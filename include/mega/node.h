@@ -363,7 +363,7 @@ struct MEGA_API LocalNode : public File
 
     // build full local path to this node
     void getlocalpath(string*, bool sdisable = false, const std::string* localseparator = nullptr) const;
-    LocalPath getlocalpath(bool sdisable = false) const;
+    LocalPath getLocalPath(bool sdisable = false) const;
     string localnodedisplaypath(FileSystemAccess& fsa) const;
 
     // return child node by name
@@ -388,7 +388,7 @@ struct MEGA_API LocalNode : public File
     void setnameparent(LocalNode*, const LocalPath* newlocalpath);
 
     LocalNode();
-    void init(Sync*, nodetype_t, LocalNode*, LocalPath);
+    void init(Sync*, nodetype_t, LocalNode*, const LocalPath&);
 
     bool serialize(string*) override;
     static LocalNode* unserialize( Sync* sync, const string* sData );

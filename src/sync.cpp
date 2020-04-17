@@ -1116,13 +1116,12 @@ bool Sync::scan(LocalPath* localpath, FileAccess* fa)
         // scan the dir, mark all items with a unique identifier
         if ((success = da->dopen(localpath->editStringDirect(), fa, false)))
         {
-            ScopedLengthRestore restoreLen(*localpath);
-
             while (da->dnext(localpath->editStringDirect(), &localname, client->followsymlinks))
             {
                 name = localname;
                 client->fsaccess->local2name(&name);
 
+                ScopedLengthRestore restoreLen(*localpath);
                 localpath->separatorAppend(LocalPath::fromLocalname(localname), *client->fsaccess, false);
 
                 // check if this record is to be ignored
@@ -1165,7 +1164,7 @@ bool Sync::scan(LocalPath* localpath, FileAccess* fa)
 // path references a new FOLDERNODE: returns created node
 // path references a existing FILENODE: returns node
 // otherwise, returns NULL
-LocalNode* Sync::checkpath(LocalNode* l, LocalPath* input_localpath, string* const localname, dstime *backoffds, bool wejustcreatedthisfolder, DirAccess* iteratingDir)
+LocalNode* Sync::checkpath(LocalNode* l, LocalPath* input_localpath, string* const localname, dstime *backoffds, bool wejustcreatedthisfolder, DirAccess *iteratingDir)
 {
     LocalNode* ll = l;
     bool newnode = false, changed = false;

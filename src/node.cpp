@@ -1317,7 +1317,7 @@ LocalNode::LocalNode()
 {}
 
 // initialize fresh LocalNode object - must be called exactly once
-void LocalNode::init(Sync* csync, nodetype_t ctype, LocalNode* cparent, LocalPath cfullpath)
+void LocalNode::init(Sync* csync, nodetype_t ctype, LocalNode* cparent, const LocalPath& cfullpath)
 {
     sync = csync;
     parent = NULL;
@@ -1607,7 +1607,7 @@ LocalNode::~LocalNode()
     }
 }
 
-LocalPath LocalNode::getlocalpath(bool sdisable) const
+LocalPath LocalNode::getLocalPath(bool sdisable) const
 {
     LocalPath p;
 
