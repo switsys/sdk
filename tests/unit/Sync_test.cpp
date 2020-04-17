@@ -319,6 +319,7 @@ TEST(Sync, computeReverseMatchScore_twoByteSeparator)
     test_computeReversePathMatchScore("//");
 }
 
+/*
 TEST(Sync, assignFilesystemIds_whenFilesystemFingerprintsMatchLocalNodes)
 {
     Fixture fx{"d"};
@@ -988,6 +989,7 @@ TEST(Sync, assignFilesystemIds_whenFileWasMoved_sameLeafName)
     ASSERT_FALSE(fx.iteratorsCorrect(ld));
     ASSERT_TRUE(fx.iteratorsCorrect(*lf_0));
 }
+*/
 
 TEST(Sync, assignFilesystemIds_emptyFolderStaysUnassigned)
 {

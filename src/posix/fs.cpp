@@ -751,8 +751,7 @@ int PosixFileSystemAccess::checkevents(Waiter* w)
                                     LOG_debug << "Filesystem notification (deletion). Root: " << lastlocalnode->name << "   Path: " << lastname;
                                     lastlocalnode->sync->dirnotify->notify(DirNotify::DIREVENTS,
                                                                            lastlocalnode,
-                                                                           lastname.c_str(),
-                                                                           lastname.size());
+                                                                           LocalPath::fromLocalname(lastname));
 
                                     r |= Waiter::NEEDEXEC;
                                 }
@@ -780,8 +779,8 @@ int PosixFileSystemAccess::checkevents(Waiter* w)
                                 {
                                     LOG_debug << "Filesystem notification. Root: " << it->second->name << "   Path: " << in->name;
                                     it->second->sync->dirnotify->notify(DirNotify::DIREVENTS,
-                                                                        it->second, in->name,
-                                                                        insize);
+                                                                        it->second,
+                                                                        LocalPath::fromLocalname(std::string(in->name, insize)));
 
                                     r |= Waiter::NEEDEXEC;
                                 }
@@ -805,8 +804,7 @@ int PosixFileSystemAccess::checkevents(Waiter* w)
                 LOG_debug << "Filesystem notification. Root: " << lastlocalnode->name << "   Path: " << lastname;
                 lastlocalnode->sync->dirnotify->notify(DirNotify::DIREVENTS,
                                                        lastlocalnode,
-                                                       lastname.c_str(),
-                                                       lastname.size());
+                                                       LocalPath::fromLocalname(lastname));
 
                 r |= Waiter::NEEDEXEC;
             }

@@ -2362,8 +2362,7 @@ void MegaClient::exec()
                             if (notification.timestamp <= dsmin)
                             {
                                 LOG_debug << "Processing extra fs notification";
-                                sync->dirnotify->notify(DirNotify::DIREVENTS, notification.localnode,
-                                                        notification.path.data(), notification.path.size());
+                                sync->dirnotify->notify(DirNotify::DIREVENTS, notification.localnode, notification.path);
                                 sync->dirnotify->notifyq[DirNotify::EXTRA].pop_front();
                             }
                             else
@@ -2492,7 +2491,7 @@ void MegaClient::exec()
                         else if (!syncfslockretry && sync->dirnotify->notifyq[DirNotify::RETRY].size())
                         {
                             syncfslockretrybt.backoff(Sync::SCANNING_DELAY_DS);
-                            fsaccess->local2path(&sync->dirnotify->notifyq[DirNotify::RETRY].front().path, &blockedfile);
+                            blockedfile = sync->dirnotify->notifyq[DirNotify::RETRY].front().path.toPath(*fsaccess);
                             syncfslockretry = true;
                         }
                     }
@@ -2747,11 +2746,11 @@ void MegaClient::exec()
                         }
                         else
                         {
-                            string localpath = (*it)->localroot->localname;
+                            LocalPath localpath = (*it)->localroot->localname;
                             if ((*it)->state == SYNC_ACTIVE || (*it)->state == SYNC_INITIALSCAN)
                             {
                                 LOG_debug << "Running syncdown on demand";
-                                if (!syncdown((*it)->localroot.get(), &localpath, true))
+                                if (!syncdown((*it)->localroot.get(), localpath.editStringDirect(), true))
                                 {
                                     // a local filesystem item was locked - schedule periodic retry
                                     // and force a full rescan afterwards as the local item may
@@ -3384,7 +3383,7 @@ void MegaClient::dispatchTransfers()
                 break;
             }
 
-            if (!nexttransfer->localfilename.size())
+            if (nexttransfer->localfilename.empty())
             {
                 // this is a fresh transfer rather than the resumption of a partly
                 // completed and deferred one
@@ -3451,7 +3450,7 @@ void MegaClient::dispatchTransfers()
                 // set file localnames (ultimate target) and one transfer-wide temp
                 // localname
                 for (file_list::iterator it = nexttransfer->files.begin();
-                    !nexttransfer->localfilename.size() && it != nexttransfer->files.end(); it++)
+                    nexttransfer->localfilename.empty() && it != nexttransfer->files.end(); it++)
                 {
                     (*it)->prepare();
                 }
@@ -3464,7 +3463,7 @@ void MegaClient::dispatchTransfers()
             bool openfinished = false;
 
             // verify that a local path was given and start/resume transfer
-            if (nexttransfer->localfilename.size())
+            if (!nexttransfer->localfilename.empty())
             {
                 TransferSlot *ts = nullptr;
 
@@ -3486,8 +3485,8 @@ void MegaClient::dispatchTransfers()
 
                         // try to open file (PUT transfers: open in nonblocking mode)
                         nexttransfer->asyncopencontext = (nexttransfer->type == PUT)
-                            ? ts->fa->asyncfopen(&nexttransfer->localfilename)
-                            : ts->fa->asyncfopen(&nexttransfer->localfilename, false, true, nexttransfer->size);
+                            ? ts->fa->asyncfopen(nexttransfer->localfilename.editStringDirect())
+                            : ts->fa->asyncfopen(nexttransfer->localfilename.editStringDirect(), false, true, nexttransfer->size);
                         asyncfopens++;
                     }
 
@@ -3516,8 +3515,8 @@ void MegaClient::dispatchTransfers()
                 {
                     // try to open file (PUT transfers: open in nonblocking mode)
                     openok = (nexttransfer->type == PUT)
-                        ? ts->fa->fopen(&nexttransfer->localfilename)
-                        : ts->fa->fopen(&nexttransfer->localfilename, false, true);
+                        ? ts->fa->fopen(nexttransfer->localfilename.editStringDirect())
+                        : ts->fa->fopen(nexttransfer->localfilename.editStringDirect(), false, true);
                     openfinished = true;
                 }
 
@@ -3571,14 +3570,14 @@ void MegaClient::dispatchTransfers()
                         }
 
                         // create thumbnail/preview imagery, if applicable (FIXME: do not re-create upon restart)
-                        if (nexttransfer->localfilename.size() && !nexttransfer->uploadhandle)
+                        if (!nexttransfer->localfilename.empty() && !nexttransfer->uploadhandle)
                         {
                             nexttransfer->uploadhandle = getuploadhandle();
 
-                            if (!gfxdisabled && gfx && gfx->isgfx(&nexttransfer->localfilename))
+                            if (!gfxdisabled && gfx && gfx->isgfx(nexttransfer->localfilename.editStringDirect()))
                             {
                                 // we want all imagery to be safely tucked away before completing the upload, so we bump minfa
-                                nexttransfer->minfa += gfx->gendimensionsputfa(ts->fa, &nexttransfer->localfilename, nexttransfer->uploadhandle, nexttransfer->transfercipher(), -1, false);
+                                nexttransfer->minfa += gfx->gendimensionsputfa(ts->fa, nexttransfer->localfilename.editStringDirect(), nexttransfer->uploadhandle, nexttransfer->transfercipher(), -1, false);
                             }
                         }
                     }
@@ -3631,8 +3630,7 @@ void MegaClient::dispatchTransfers()
                 }
                 else if (openfinished)
                 {
-                    string utf8path;
-                    fsaccess->local2path(&nexttransfer->localfilename, &utf8path);
+                    string utf8path = nexttransfer->localfilename.toPath(*fsaccess);
                     if (nexttransfer->type == GET)
                     {
                         LOG_err << "Error dispatching transfer. Temporary file not writable: " << utf8path;
@@ -9493,7 +9491,7 @@ void MegaClient::filecachedel(File *file, DBTableTransactionCommitter* committer
     if (file->temporaryfile)
     {
         LOG_debug << "Removing temporary file";
-        fsaccess->unlinklocal(&file->localname);
+        fsaccess->unlinklocal(file->localname.editStringDirect());
     }
 }
 
@@ -12212,7 +12210,8 @@ error MegaClient::addsync(SyncConfig syncConfig, const char* debris, string* loc
                 }
             }
 
-            if (sync->scan(&rootpath, fa.get()))
+            auto path = LocalPath::fromLocalname(rootpath);
+            if (sync->scan(&path, fa.get()))
             {
                 syncsup = false;
                 e = API_OK;
@@ -12376,7 +12375,7 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
         size_t t = localpath->size();
 
         localpath->append(fsaccess->localseparator);
-        localpath->append(ll->localname);
+        localpath->append(*ll->localname.editStringDirect());
 
         // do we have a corresponding remote child?
         if (rit != nchildren.end())
@@ -12551,7 +12550,8 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
                                                rit->second->localnode, localname.c_str());
 
                     // update LocalNode tree to reflect the move/rename
-                    rit->second->localnode->setnameparent(l, localpath);
+                    auto localpathPointed = LocalPath::fromLocalname(*localpath);
+                    rit->second->localnode->setnameparent(l, &localpathPointed);
 
                     rit->second->localnode->sync->statecacheadd(rit->second->localnode);
 
@@ -12607,7 +12607,7 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
                     fsaccess->local2path(localpath, &localname);
                     app->syncupdate_get(l->sync, rit->second, localname.c_str());
 
-                    rit->second->syncget = new SyncFileGet(l->sync, rit->second, localpath);
+                    rit->second->syncget = new SyncFileGet(l->sync, rit->second, LocalPath::fromLocalname(*localpath));
                     nextreqtag();
                     DBTableTransactionCommitter committer(tctable); // TODO: use one committer for all files in the loop, without calling syncdown() recursively
                     startxfer(GET, rit->second->syncget, committer);
@@ -12625,7 +12625,8 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
                 // create local path, add to LocalNodes and recurse
                 else if (fsaccess->mkdirlocal(localpath))
                 {
-                    LocalNode* ll = l->sync->checkpath(l, localpath, &localname, NULL, true, nullptr);
+                    auto localpathpointed = LocalPath::fromLocalname(*localpath);
+                    LocalNode* ll = l->sync->checkpath(l, &localpathpointed, &localname, NULL, true, nullptr);
 
                     if (ll && ll != (LocalNode*)~0)
                     {
@@ -12682,9 +12683,6 @@ bool MegaClient::syncup(LocalNode* l, dstime* nds)
 
     // build array of sync-relevant (newest alias wins) remote children by name
     attr_map::iterator ait;
-
-    // UTF-8 converted local name
-    string localname;
 
     if (l->node)
     {
@@ -12755,8 +12753,8 @@ bool MegaClient::syncup(LocalNode* l, dstime* nds)
             continue;
         }
 
-        localname = *lit->first;
-        fsaccess->local2name(&localname);
+        // UTF-8 converted local name
+        string localname = lit->first->toName(*fsaccess);
         if (!localname.size() || !ll->name.size())
         {
             if (!ll->reported)
@@ -12764,7 +12762,7 @@ bool MegaClient::syncup(LocalNode* l, dstime* nds)
                 ll->reported = true;
 
                 char report[256];
-                sprintf(report, "%d %d %d %d", (int)lit->first->size(), (int)localname.size(), (int)ll->name.size(), (int)ll->type);
+                sprintf(report, "%d %d %d %d", (int)lit->first->editStringDirect()->size(), (int)localname.size(), (int)ll->name.size(), (int)ll->type);
 
                 // report a "no-name localnode" event
                 reportevent("LN", report, 0);
@@ -12818,7 +12816,7 @@ bool MegaClient::syncup(LocalNode* l, dstime* nds)
                         // same fingerprint, if available): no action needed
                         if (!ll->checked)
                         {
-                            if (!gfxdisabled && gfx && gfx->isgfx(&ll->localname))
+                            if (!gfxdisabled && gfx && gfx->isgfx(ll->localname.editStringDirect()))
                             {
                                 int missingattr = 0;
 
@@ -12834,7 +12832,7 @@ bool MegaClient::syncup(LocalNode* l, dstime* nds)
                                 }
 
                                 if (missingattr && checkaccess(ll->node, OWNER)
-                                        && !gfx->isvideo(&ll->localname))
+                                        && !gfx->isvideo(ll->localname.editStringDirect()))
                                 {
                                     char me64[12];
                                     Base64::btoa((const byte*)&me, MegaClient::USERHANDLE, me64);
@@ -13699,7 +13697,7 @@ bool MegaClient::startxfer(direction_t d, File* f, DBTableTransactionCommitter& 
                 // missing FileFingerprint for local file - generate
                 auto fa = fsaccess->newfileaccess();
 
-                if (fa->fopen(&f->localname, d == PUT, d == GET))
+                if (fa->fopen(f->localname.editStringDirect(), d == PUT, d == GET))
                 {
                     f->genfingerprint(fa.get());
                 }
@@ -13713,7 +13711,7 @@ bool MegaClient::startxfer(direction_t d, File* f, DBTableTransactionCommitter& 
             }
 
 #ifdef USE_MEDIAINFO
-            mediaFileInfo.requestCodecMappingsOneTime(this, &f->localname);  
+            mediaFileInfo.requestCodecMappingsOneTime(this, f->localname.editStringDirect());  
 #endif
         }
         else
@@ -13809,7 +13807,7 @@ bool MegaClient::startxfer(direction_t d, File* f, DBTableTransactionCommitter& 
                     }
 
                     auto fa = fsaccess->newfileaccess();
-                    if (!fa->fopen(&t->localfilename))
+                    if (!fa->fopen(t->localfilename.editStringDirect()))
                     {
                         if (d == PUT)
                         {
@@ -13928,7 +13926,7 @@ void MegaClient::stopxfer(File* f, DBTableTransactionCommitter* committer)
         }
         else
         {
-            if (transfer->type == PUT && transfer->localfilename.size())
+            if (transfer->type == PUT && transfer->localfilename.editStringDirect())
             {
                 LOG_debug << "Updating transfer path";
                 transfer->files.front()->prepare();
