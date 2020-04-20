@@ -2828,10 +2828,10 @@ public:
 
 void exec_fingerprint(autocomplete::ACState& s)
 {
-    string localfilepath, filepath = s.words[1].s;
-    client->fsaccess->path2local(&filepath, &localfilepath);
+    auto localfilepath = LocalPath::fromPath(s.words[1].s, *client->fsaccess);
     auto fa = client->fsaccess->newfileaccess();
-    if (fa->fopen(&localfilepath, true, false, nullptr))
+
+    if (fa->fopen(localfilepath, true, false, nullptr))
     {
         FileFingerprint fp;
         fp.genfingerprint(fa.get());
@@ -2841,7 +2841,7 @@ void exec_fingerprint(autocomplete::ACState& s)
     }
     else
     {
-        cout << "Failed to open: " << filepath << endl;
+        cout << "Failed to open: " << s.words[1].s << endl;
     }
 }
 
