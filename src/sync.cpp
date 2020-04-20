@@ -394,10 +394,10 @@ size_t assignFilesystemIdsImpl(const FingerprintCache& fingerprints, Fingerprint
 
 } // anonymous
 
-int computeReversePathMatchScore(string& accumulated, LocalPath& path1Arg, LocalPath& path2Arg, FileSystemAccess& fsaccess)
+int computeReversePathMatchScore(string& accumulated, const LocalPath& path1Arg, const LocalPath& path2Arg, const FileSystemAccess& fsaccess)
 {
-    string& path1 = *path1Arg.editStringDirect();
-    string& path2 = *path2Arg.editStringDirect();
+    const string& path1 = *path1Arg.editStringDirect();
+    const string& path2 = *path2Arg.editStringDirect();
 
     if (path1.empty() || path2.empty())
     {

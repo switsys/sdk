@@ -31,7 +31,7 @@ namespace mega {
 // returns the number of consecutive character matches (excluding separators) but only including whole node names.
 // It's assumed that the paths are normalized (e.g. not contain ..) and separated with the given `localseparator`.
 // `accumulated` is a buffer that is used to avoid constant reallocations.
-int computeReversePathMatchScore(string& accumulated, LocalPath& path1, LocalPath& path2, FileSystemAccess&);
+int computeReversePathMatchScore(string& accumulated, const LocalPath& path1, const LocalPath& path2, const FileSystemAccess&);
 
 // Recursively iterates through the filesystem tree starting at the sync root and assigns
 // fs IDs to those local nodes that match the fingerprint retrieved from disk.
