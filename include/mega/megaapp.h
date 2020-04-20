@@ -303,17 +303,17 @@ struct MEGA_API MegaApp
     virtual void syncupdate_treestate(LocalNode*) { }
 
     // sync filename filter
-    virtual bool sync_syncable(Sync*, const char*, string*, Node*)
+    virtual bool sync_syncable(Sync*, const char*, LocalPath&, Node*)
     {
         return true;
     }
 
-    virtual bool sync_syncable(Sync*, const char*, string*)
+    virtual bool sync_syncable(Sync*, const char*, LocalPath&)
     {
         return true;
     }
 
-    virtual void sync_auto_resumed(const string&, handle, long long, const vector<string>&) { }
+    virtual void sync_auto_resume_result(const string&, handle, long long, const vector<string>&, error e) { }
 
     // suggest reload due to possible race condition with other clients
     virtual void reload(const char*) { }

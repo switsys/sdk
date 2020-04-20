@@ -27,19 +27,16 @@
 
 namespace mega {
 
-// Returns true for a path that can be synced (.debris is not one of those).
-bool isPathSyncable(const string& localpath, const string& localdebris, const string& localseparator);
-
 // Searching from the back, this function compares path1 and path2 character by character and
 // returns the number of consecutive character matches (excluding separators) but only including whole node names.
 // It's assumed that the paths are normalized (e.g. not contain ..) and separated with the given `localseparator`.
 // `accumulated` is a buffer that is used to avoid constant reallocations.
-int computeReversePathMatchScore(string& accumulated, const string& path1, const string& path2, const string& localseparator);
+int computeReversePathMatchScore(string& accumulated, LocalPath& path1, LocalPath& path2, FileSystemAccess&);
 
 // Recursively iterates through the filesystem tree starting at the sync root and assigns
 // fs IDs to those local nodes that match the fingerprint retrieved from disk.
 bool assignFilesystemIds(Sync& sync, MegaApp& app, FileSystemAccess& fsaccess, handlelocalnode_map& fsidnodes,
-                         const string& localdebris, const string& localseparator);
+                         LocalPath& localdebris);
 
 // A collection of sync configs backed by a database table
 class MEGA_API SyncConfigBag
@@ -168,7 +165,7 @@ public:
     DbTable* statecachetable = nullptr;
 
     // move file or folder to localdebris
-    bool movetolocaldebris(string* localpath);
+    bool movetolocaldebris(LocalPath& localpath);
 
     // original filesystem fingerprint
     fsfp_t fsfp = 0;

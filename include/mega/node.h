@@ -364,6 +364,7 @@ struct MEGA_API LocalNode : public File
     // build full local path to this node
     void getlocalpath(string*, bool sdisable = false, const std::string* localseparator = nullptr) const;
     LocalPath getLocalPath(bool sdisable = false) const;
+    void getLocalPath(LocalPath& reusePath, bool sdisable = false) const;
     string localnodedisplaypath(FileSystemAccess& fsa) const;
 
     // return child node by name
@@ -385,10 +386,10 @@ struct MEGA_API LocalNode : public File
     // fsidnodes is a map from fsid to LocalNode, keeping track of all fs ids.
     void setfsid(handle newfsid, handlelocalnode_map& fsidnodes);
 
-    void setnameparent(LocalNode*, const LocalPath* newlocalpath);
+    void setnameparent(LocalNode*, LocalPath* newlocalpath, bool updatecache);
 
     LocalNode();
-    void init(Sync*, nodetype_t, LocalNode*, const LocalPath&);
+    void init(Sync*, nodetype_t, LocalNode*, LocalPath&);
 
     bool serialize(string*) override;
     static LocalNode* unserialize( Sync* sync, const string* sData );

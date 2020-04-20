@@ -1045,11 +1045,10 @@ bool MegaBackgroundMediaUploadPrivate::analyseMediaInfo(const char* inputFilepat
         return false;
     }
 
-    string inputFilepathtmp(inputFilepath), localfilename;
-    api->fsAccess->path2local(&inputFilepathtmp, &localfilename);
+    auto localfilename = LocalPath::fromPath(inputFilepath, *api->fsAccess);
 
     char ext[8];
-    if (api->fsAccess->getextension(&localfilename, ext, sizeof(ext)) && MediaProperties::isMediaFilenameExt(ext))
+    if (api->fsAccess->getextension(localfilename, ext, sizeof(ext)) && MediaProperties::isMediaFilenameExt(ext))
     {
         mediaproperties.extractMediaPropertyFileAttributes(localfilename, api->fsAccess);
 
@@ -1070,10 +1069,9 @@ char *MegaBackgroundMediaUploadPrivate::encryptFile(const char* inputFilepath, i
     }
 
     std::unique_ptr<FileAccess> fain(api->fsAccess->newfileaccess());
-    string inputFilepathtmp(inputFilepath), localfilename;
-    api->fsAccess->path2local(&inputFilepathtmp, &localfilename);
+    auto localfilename = LocalPath::fromPath(inputFilepath, *api->fsAccess);
 
-    if (fain->fopen(&localfilename, true, false) || fain->type != FILENODE)
+    if (fain->fopen(localfilename, true, false) || fain->type != FILENODE)
     {
         if (*length == -1)
         {
@@ -1101,11 +1099,10 @@ char *MegaBackgroundMediaUploadPrivate::encryptFile(const char* inputFilepath, i
             }
             else
             {
-                string localencryptedfilename, outputFilepathtmp(outputFilepath);
-                api->fsAccess->path2local(&outputFilepathtmp, &localencryptedfilename);
+                auto localencryptedfilename = LocalPath::fromPath(outputFilepath, *api->fsAccess);
 
                 std::unique_ptr<FileAccess> faout(api->fsAccess->newfileaccess());
-                if (faout->fopen(&localencryptedfilename, false, true))
+                if (faout->fopen(localencryptedfilename, false, true))
                 {
                     SymmCipher cipher;
                     cipher.setkey(filekey);
@@ -1219,7 +1216,7 @@ bool WildcardMatch(const char *pszString, const char *pszMatch)
     return !*pszMatch;
 }
 
-bool MegaApiImpl::is_syncable(Sync *sync, const char *name, string *localpath)
+bool MegaApiImpl::is_syncable(Sync *sync, const char *name, const LocalPath& localpath)
 {
     // Don't sync these system files from OS X
     if (!strcmp(name, "Icon\x0d"))
@@ -1246,13 +1243,11 @@ bool MegaApiImpl::is_syncable(Sync *sync, const char *name, string *localpath)
 
     if (regExp || excludedPaths.size())
     {             
-        string utf8path;
-        fsAccess->local2path(localpath, &utf8path);
-        const char* path = utf8path.c_str();
+        string utf8path = localpath.toPath(*fsAccess);
 
         for (unsigned int i = 0; i < excludedPaths.size(); i++)
         {
-            if (WildcardMatch(path, excludedPaths[i].c_str()))
+            if (WildcardMatch(utf8path.c_str(), excludedPaths[i].c_str()))
             {
                 return false;
             }
@@ -1450,9 +1445,9 @@ char *MegaApiImpl::getBlockedPath()
 {
     char *path = NULL;
     sdkMutex.lock();
-    if (client->blockedfile.size())
+    if (!client->blockedfile.empty())
     {
-        path = MegaApi::strdup(client->blockedfile.c_str());
+        path = MegaApi::strdup(client->blockedfile.toPath(*fsAccess).c_str());
     }
     sdkMutex.unlock();
     return path;
@@ -4846,18 +4841,18 @@ void MegaFileGet::prepare()
     {
         transfer->localfilename = localname;
 
-        string suffix;
-        transfer->client->fsaccess->tmpnamelocal(&suffix);
+        LocalPath suffix;
+        transfer->client->fsaccess->tmpnamelocal(suffix);
 
         size_t index =  string::npos;
         if (transfer->localfilename.findPrevSeparator(index, *transfer->client->fsaccess))
         {
             transfer->localfilename.truncate(index);
-            transfer->localfilename.separatorAppend(LocalPath::fromLocalname(suffix), *transfer->client->fsaccess, true);
+            transfer->localfilename.separatorAppend(suffix, *transfer->client->fsaccess, true);
         }
         else
         {
-            transfer->localfilename.append(LocalPath::fromLocalname(suffix));
+            transfer->localfilename.append(suffix);
         }
     }
 }
@@ -6259,7 +6254,6 @@ bool MegaApiImpl::createLocalFolder(const char *path)
         return false;
     }
 
-    string localpath;
     string sPath(path);
     
 #if defined(_WIN32) && !defined(WINDOWS_PHONE)
@@ -6267,10 +6261,10 @@ bool MegaApiImpl::createLocalFolder(const char *path)
         sPath.insert(0, "\\\\?\\");
 #endif
     
-    client->fsaccess->path2local(&sPath, &localpath);
+    auto localpath = LocalPath::fromPath(sPath, *client->fsaccess);
 
     sdkMutex.lock();
-    bool success = client->fsaccess->mkdirlocal(&localpath);
+    bool success = client->fsaccess->mkdirlocal(localpath);
     sdkMutex.unlock();
 
     return success;
@@ -7358,7 +7352,8 @@ bool MegaApiImpl::hasToForceUpload(const Node &node, const MegaTransferPrivate &
     bool hasPreview = (Node::hasfileattribute(&node.fileattrstring, GfxProc::PREVIEW) != 0);
     bool hasThumbnail = (Node::hasfileattribute(&node.fileattrstring, GfxProc::THUMBNAIL) != 0);
     string name = node.displayname();
-    bool isMedia = gfxAccess->isgfx(&name) || gfxAccess->isvideo(&name);
+    LocalPath localname = LocalPath::fromPath(name, *fsAccess);
+    bool isMedia = gfxAccess->isgfx(localname) || gfxAccess->isvideo(localname);
     bool canForceUpload = transfer.isStreamingTransfer();
     bool isPdf = name.find(".pdf") != string::npos;
 
@@ -8198,7 +8193,7 @@ bool MegaApiImpl::moveToLocalDebris(const char *path)
         return false;
     }
 
-    bool result = sync->movetolocaldebris(localpath.editStringDirect());
+    bool result = sync->movetolocaldebris(localpath);
     sdkMutex.unlock();
 
     return result;
@@ -8270,10 +8265,10 @@ int MegaApiImpl::syncPathState(string* path)
                 size_t index = fsAccess->lastpartlocal(path);
                 string name = path->substr(index);
                 fsAccess->local2name(&name);
-                if (is_syncable(sync, name.c_str(), path))
+                if (is_syncable(sync, name.c_str(), localpath))
                 {
                     auto fa = fsAccess->newfileaccess();
-                    if (fa->fopen(path, false, false) && (fa->type == FOLDERNODE || is_syncable(fa->size)))
+                    if (fa->fopen(localpath, false, false) && (fa->type == FOLDERNODE || is_syncable(fa->size)))
                     {
                         state = MegaApi::STATE_PENDING;
                     }
@@ -8540,7 +8535,7 @@ bool MegaApiImpl::isSyncable(const char *path, long long size)
 
             size_t lastpart = localpath.lastpartlocal(*fsAccess);
             name = localpath.subpathFrom(lastpart).toName(*fsAccess);;
-            result = is_syncable(sync, name.c_str(), localpath.editStringDirect());
+            result = is_syncable(sync, name.c_str(), localpath);
             break;
         }
     }
@@ -8728,17 +8723,12 @@ bool MegaApiImpl::createThumbnail(const char *imagePath, const char *dstPath)
         return false;
     }
 
-    string utf8ImagePath = imagePath;
-    string localImagePath;
-    fsAccess->path2local(&utf8ImagePath, &localImagePath);
-
-    string utf8DstPath = dstPath;
-    string localDstPath;
-    fsAccess->path2local(&utf8DstPath, &localDstPath);
+    LocalPath localImagePath = LocalPath::fromPath(imagePath, *fsAccess);
+    LocalPath localDstPath = LocalPath::fromPath(dstPath, *fsAccess);
 
     sdkMutex.lock();
-    bool result = gfxAccess->savefa(&localImagePath, GfxProc::dimensions[GfxProc::THUMBNAIL][0],
-            GfxProc::dimensions[GfxProc::THUMBNAIL][1], &localDstPath);
+    bool result = gfxAccess->savefa(localImagePath, GfxProc::dimensions[GfxProc::THUMBNAIL][0],
+            GfxProc::dimensions[GfxProc::THUMBNAIL][1], localDstPath);
     sdkMutex.unlock();
 
     return result;
@@ -8751,17 +8741,12 @@ bool MegaApiImpl::createPreview(const char *imagePath, const char *dstPath)
         return false;
     }
 
-    string utf8ImagePath = imagePath;
-    string localImagePath;
-    fsAccess->path2local(&utf8ImagePath, &localImagePath);
-
-    string utf8DstPath = dstPath;
-    string localDstPath;
-    fsAccess->path2local(&utf8DstPath, &localDstPath);
+    LocalPath localImagePath = LocalPath::fromPath(imagePath, *fsAccess);
+    LocalPath localDstPath = LocalPath::fromPath(dstPath, *fsAccess);
 
     sdkMutex.lock();
-    bool result = gfxAccess->savefa(&localImagePath, GfxProc::dimensions[GfxProc::PREVIEW][0],
-            GfxProc::dimensions[GfxProc::PREVIEW][1], &localDstPath);
+    bool result = gfxAccess->savefa(localImagePath, GfxProc::dimensions[GfxProc::PREVIEW][0],
+            GfxProc::dimensions[GfxProc::PREVIEW][1], localDstPath);
     sdkMutex.unlock();
 
     return result;
@@ -8774,17 +8759,12 @@ bool MegaApiImpl::createAvatar(const char *imagePath, const char *dstPath)
         return false;
     }
     
-    string utf8ImagePath = imagePath;
-    string localImagePath;
-    fsAccess->path2local(&utf8ImagePath, &localImagePath);
-    
-    string utf8DstPath = dstPath;
-    string localDstPath;
-    fsAccess->path2local(&utf8DstPath, &localDstPath);
+    LocalPath localImagePath = LocalPath::fromPath(imagePath, *fsAccess);
+    LocalPath localDstPath = LocalPath::fromPath(dstPath, *fsAccess);
     
     sdkMutex.lock();
-    bool result = gfxAccess->savefa(&localImagePath, GfxProc::dimensionsavatar[GfxProc::AVATAR250X250][0],
-            GfxProc::dimensionsavatar[GfxProc::AVATAR250X250][1], &localDstPath);
+    bool result = gfxAccess->savefa(localImagePath, GfxProc::dimensionsavatar[GfxProc::AVATAR250X250][0],
+            GfxProc::dimensionsavatar[GfxProc::AVATAR250X250][1], localDstPath);
     sdkMutex.unlock();
     
     return result;
@@ -11203,12 +11183,10 @@ char *MegaApiImpl::getFingerprint(const char *filePath)
 {
     if(!filePath) return NULL;
 
-    string path = filePath;
-    string localpath;
-    fsAccess->path2local(&path, &localpath);
+    auto localpath = LocalPath::fromPath(filePath, *fsAccess);
 
     auto fa = fsAccess->newfileaccess();
-    if(!fa->fopen(&localpath, true, false))
+    if(!fa->fopen(localpath, true, false))
         return NULL;
 
     FileFingerprint fp;
@@ -11403,12 +11381,10 @@ char *MegaApiImpl::getCRC(const char *filePath)
 {
     if(!filePath) return NULL;
 
-    string path = filePath;
-    string localpath;
-    fsAccess->path2local(&path, &localpath);
+    auto localpath = LocalPath::fromPath(filePath, *fsAccess);
 
     auto fa = fsAccess->newfileaccess();
-    if(!fa->fopen(&localpath, true, false))
+    if(!fa->fopen(localpath, true, false))
         return NULL;
 
     FileFingerprint fp;
@@ -12748,7 +12724,7 @@ void MegaApiImpl::syncupdate_treestate(LocalNode *l)
     fireOnFileSyncStateChanged(megaSync, &localpath, (int)l->ts);
 }
 
-bool MegaApiImpl::sync_syncable(Sync *sync, const char *name, string *localpath, Node *node)
+bool MegaApiImpl::sync_syncable(Sync *sync, const char *name, LocalPath& localpath, Node *node)
 {
     if (!sync || !sync->appData || (node->type == FILENODE && !is_syncable(node->size)))
     {
@@ -12761,7 +12737,7 @@ bool MegaApiImpl::sync_syncable(Sync *sync, const char *name, string *localpath,
     return result;
 }
 
-bool MegaApiImpl::sync_syncable(Sync *sync, const char *name, string *localpath)
+bool MegaApiImpl::sync_syncable(Sync *sync, const char *name, LocalPath& localpath)
 {
     {
         std::lock_guard<std::mutex> g(mSyncable_fa_mutex);
@@ -12783,7 +12759,7 @@ bool MegaApiImpl::sync_syncable(Sync *sync, const char *name, string *localpath)
     return result;
 }
 
-void MegaApiImpl::sync_auto_resumed(const string& localPath, const handle remoteNode, const long long localFp, const std::vector<std::string>& regExp)
+void MegaApiImpl::sync_auto_resume_result(const string& localPath, const handle remoteNode, const long long localFp, const std::vector<std::string>& regExp, error e)
 {
     const int nextTag = client->nextreqtag();
 
@@ -13341,11 +13317,10 @@ void MegaApiImpl::fa_complete(handle, fatype, const char* data, uint32_t len)
 
         auto f = client->fsaccess->newfileaccess();
         string filePath(request->getFile());
-        string localPath;
-        fsAccess->path2local(&filePath, &localPath);
-        fsAccess->unlinklocal(&localPath);
+        auto localPath = LocalPath::fromPath(filePath, *fsAccess);
+        fsAccess->unlinklocal(localPath);
 
-        bool success = f->fopen(&localPath, false, true)
+        bool success = f->fopen(localPath, false, true)
                     && f->fwrite((const byte*)data, len, 0);
 
         f.reset();
@@ -13731,11 +13706,10 @@ void MegaApiImpl::http_result(error e, int httpCode, byte *data, int size)
         {
             auto f = client->fsaccess->newfileaccess();
             string filePath(file);
-            string localPath;
-            fsAccess->path2local(&filePath, &localPath);
+            auto localPath = LocalPath::fromPath(filePath, *fsAccess);
 
-            fsAccess->unlinklocal(&localPath);
-            if (!f->fopen(&localPath, false, true))
+            fsAccess->unlinklocal(localPath);
+            if (!f->fopen(localPath, false, true))
             {
                 e = API_EWRITE;
             }
@@ -14524,12 +14498,11 @@ void MegaApiImpl::getua_result(byte* data, unsigned len, attr_t type)
 
                 auto f = client->fsaccess->newfileaccess();
                 string filePath(request->getFile());
-                string localPath;
-                fsAccess->path2local(&filePath, &localPath);
+                auto localPath = LocalPath::fromPath(filePath, *fsAccess);
 
-                fsAccess->unlinklocal(&localPath);
+                fsAccess->unlinklocal(localPath);
                 
-                bool success = f->fopen(&localPath, false, true)
+                bool success = f->fopen(localPath, false, true)
                             && f->fwrite((const byte*)data, len, 0);
 
                 f.reset();
@@ -17641,7 +17614,7 @@ unsigned MegaApiImpl::sendPendingTransfers()
                 auto wLocalPath = LocalPath::fromPath(tmpString, *client->fsaccess);
 
                 auto fa = fsAccess->newfileaccess();
-                if (!fa->fopen(wLocalPath.editStringDirect(), true, false))
+                if (!fa->fopen(wLocalPath, true, false))
                 {
                     e = API_EREAD;
                     break;
@@ -17920,12 +17893,11 @@ unsigned MegaApiImpl::sendPendingTransfers()
                         path += securename;
                     }
 
-                    string wLocalPath;
                     FileFingerprint *prevFp = NULL;
                     m_off_t size = 0;
-                    fsAccess->path2local(&path, &wLocalPath);
+                    auto wLocalPath = LocalPath::fromPath(path, *fsAccess);
                     auto fa = fsAccess->newfileaccess();
-                    if (fa->fopen(&wLocalPath, true, false))
+                    if (fa->fopen(wLocalPath, true, false))
                     {
                         if (node)
                         {
@@ -18103,15 +18075,16 @@ unsigned MegaApiImpl::sendPendingTransfers()
 void MegaApiImpl::removeRecursively(const char *path)
 {
 #ifndef _WIN32
-    string spath = path;
-    PosixFileSystemAccess::emptydirlocal(&spath);
+    auto localpath = LocalPath::fromLocalname(path);
+    PosixFileSystemAccess::emptydirlocal(localpath);
 #else
     string utf16path;
     MegaApi::utf8ToUtf16(path, &utf16path);
     if (utf16path.size() > 1)
     {
         utf16path.resize(utf16path.size() - 1);
-        WinFileSystemAccess::emptydirlocal(&utf16path);
+        auto localpath = LocalPath::fromLocalname(utf16path);
+        WinFileSystemAccess::emptydirlocal(localpath);
     }
 #endif
 }
@@ -19250,12 +19223,10 @@ void MegaApiImpl::sendPendingRequests()
                 // read the attribute value from file
                 if (file)
                 {
-                    string path = file;
-                    string localpath;
-                    fsAccess->path2local(&path, &localpath);
+                    auto localpath = LocalPath::fromPath(file, *fsAccess);
 
                     auto f = fsAccess->newfileaccess();
-                    if (!f->fopen(&localpath, 1, 0))
+                    if (!f->fopen(localpath, 1, 0))
                     {
                         e = API_EREAD;
                         break;
@@ -19467,13 +19438,11 @@ void MegaApiImpl::sendPendingRequests()
             {
                 if (!node == !bu) { e = API_EARGS; break; }
 
-                string path = srcFilePath;
-                string localpath;
-                fsAccess->path2local(&path, &localpath);
+                auto localpath = LocalPath::fromPath(srcFilePath, *fsAccess);
 
                 std::unique_ptr<string> attributedata(new string);
                 std::unique_ptr<FileAccess> f(fsAccess->newfileaccess());
-                if (!f->fopen(&localpath, 1, 0))
+                if (!f->fopen(localpath, 1, 0))
                 {
                     e = API_EREAD;
                     break;
@@ -21846,7 +21815,7 @@ int MegaApiImpl::isWaiting()
 #ifdef ENABLE_SYNC
     if (client->syncfslockretry || client->syncfsopsfailed)
     {
-        LOG_debug << "SDK waiting for a blocked file: " << client->blockedfile;
+        LOG_debug << "SDK waiting for a blocked file: " << client->blockedfile.toPath(*fsAccess);
         return RETRY_LOCAL_LOCK;
     }
 #endif
@@ -23493,10 +23462,7 @@ void MegaFolderUploadController::start(MegaNode*)
     }
     else
     {
-        string path = transfer->getPath();
-        string localpath;
-        client->fsaccess->path2local(&path, &localpath);
-
+        auto localpath = LocalPath::fromPath(transfer->getPath(), *client->fsaccess);
         MegaNode *child = megaApi->getChildNode(parent, name);
 
         if(!child || !child->isFolder())
@@ -23531,36 +23497,27 @@ void MegaFolderUploadController::cancel()
 void MegaFolderUploadController::onFolderAvailable(MegaHandle handle)
 {
     recursive++;
-    string localPath = pendingFolders.front();
+    auto localPath = pendingFolders.front();
     pendingFolders.pop_front();
 
     MegaNode *parent = megaApi->getNodeByHandle(handle);
 
-    string localname;
+    LocalPath localname;
     DirAccess* da;
     da = client->fsaccess->newdiraccess();
     if (da->dopen(&localPath, NULL, false))
     {
-        size_t t = localPath.size();
-
         nodetype_t dirEntryType;
-        while (da->dnext(&localPath, &localname, client->followsymlinks, &dirEntryType))
+        while (da->dnext(localPath, localname, client->followsymlinks, &dirEntryType))
         {
-            if (t)
-            {
-                localPath.append(client->fsaccess->localseparator);
-            }
+            ScopedLengthRestore restoreLen(localPath);
+            localPath.separatorAppend(localname, *client->fsaccess, false);
 
-            localPath.append(localname);
-
-            string name = localname;
-            client->fsaccess->local2name(&name);
+            string name = localname.toName(*client->fsaccess);
             if (dirEntryType == FILENODE)
             {
                 pendingTransfers++;
-                string utf8path;
-                client->fsaccess->local2path(&localPath, &utf8path);
-                    megaApi->startUpload(false, utf8path.c_str(), parent, (const char *)NULL, -1, tag, false, NULL, false, false, this);
+                megaApi->startUpload(false, localPath.toPath(*client->fsaccess).c_str(), parent, (const char *)NULL, -1, tag, false, NULL, false, false, this);
             }
             else if (dirEntryType == FOLDERNODE)
             {
@@ -23577,7 +23534,6 @@ void MegaFolderUploadController::onFolderAvailable(MegaHandle handle)
                 }
                 delete child;
             }
-            localPath.resize(t);
         }
     }
 
@@ -23744,7 +23700,7 @@ MegaBackupController::MegaBackupController(MegaBackupController *backup)
     this->recursive = backup->recursive;
     this->pendingTransfers = backup->pendingTransfers;
     this->pendingTags = backup->pendingTags;
-    for (std::list<string>::iterator it = backup->pendingFolders.begin(); it != backup->pendingFolders.end(); it++)
+    for (auto it = backup->pendingFolders.begin(); it != backup->pendingFolders.end(); it++)
     {
         this->pendingFolders.push_back(*it);
     }
@@ -24273,9 +24229,7 @@ void MegaBackupController::start(bool skip)
         }
         megaApi->fireOnBackupStateChanged(this);
 
-        string path = basepath;
-        string localpath;
-        client->fsaccess->path2local(&path, &localpath);
+        auto localpath = LocalPath::fromPath(basepath, *client->fsaccess);
 
         MegaNode *child = megaApi->getChildNode(parent, backupname.c_str());
 
@@ -24319,42 +24273,33 @@ void MegaBackupController::onFolderAvailable(MegaHandle handle)
         numberFolders++;
     }
     recursive++;
-    string localPath = pendingFolders.front();
+    LocalPath localPath = pendingFolders.front();
     pendingFolders.pop_front();
 
     if (state == BACKUP_ONGOING)
     {
-        string localname;
+        LocalPath localname;
         DirAccess* da;
         da = client->fsaccess->newdiraccess();
         if (da->dopen(&localPath, NULL, false))
         {
-            size_t t = localPath.size();
-
-            while (da->dnext(&localPath, &localname, client->followsymlinks))
+            while (da->dnext(localPath, localname, client->followsymlinks))
             {
-                if (t)
-                {
-                    localPath.append(client->fsaccess->localseparator);
-                }
-
-                localPath.append(localname);
+                ScopedLengthRestore restoreLen(localPath);
+                localPath.separatorAppend(localname, *client->fsaccess, false);
 
                 //TODO: add exclude filters here
 
                 auto fa = client->fsaccess->newfileaccess();
-                if(fa->fopen(&localPath, true, false))
+                if(fa->fopen(localPath, true, false))
                 {
-                    string name = localname;
-                    client->fsaccess->local2name(&name);
+                    string name = localname.toName(*client->fsaccess);
                     if(fa->type == FILENODE)
                     {
                         pendingTransfers++;
-                        string utf8path;
-                        client->fsaccess->local2path(&localPath, &utf8path);
 
                         totalFiles++;
-                        megaApi->startUpload(false, utf8path.c_str(), parent, (const char *)NULL, -1, folderTransferTag, true, NULL, false, false, this);
+                        megaApi->startUpload(false, localPath.toPath(*client->fsaccess).c_str(), parent, (const char *)NULL, -1, folderTransferTag, true, NULL, false, false, this);
                     }
                     else
                     {
@@ -24372,8 +24317,6 @@ void MegaBackupController::onFolderAvailable(MegaHandle handle)
                         delete child;
                     }
                 }
-
-                localPath.resize(t);
             }
         }
 
@@ -24385,7 +24328,7 @@ void MegaBackupController::onFolderAvailable(MegaHandle handle)
     }
     else
     {
-        LOG_warn << " Backup folder created while not ONGOING: " << localPath;
+        LOG_warn << " Backup folder created while not ONGOING: " << localPath.toPath(*client->fsaccess);
     }
 
     delete parent;
@@ -24858,12 +24801,11 @@ void MegaFolderDownloadController::downloadFolderNode(MegaNode *node, string *pa
 {
     recursive++;
 
-    string localpath;
-    client->fsaccess->path2local(path, &localpath);
+    auto localpath = LocalPath::fromPath(*path, *client->fsaccess);
     auto da = client->fsaccess->newfileaccess();
-    if (!da->fopen(&localpath, true, false))
+    if (!da->fopen(localpath, true, false))
     {
-        if (!client->fsaccess->mkdirlocal(&localpath))
+        if (!client->fsaccess->mkdirlocal(localpath))
         {
             da.reset();
             LOG_err << "Unable to create folder: " << *path;
@@ -24892,7 +24834,6 @@ void MegaFolderDownloadController::downloadFolderNode(MegaNode *node, string *pa
     }
     da.reset();
 
-    localpath.append(client->fsaccess->localseparator);
     MegaNodeList *children = NULL;
     bool deleteChildren = false;
     if (node->isForeign())
@@ -24918,14 +24859,11 @@ void MegaFolderDownloadController::downloadFolderNode(MegaNode *node, string *pa
     for (int i = 0; i < children->size(); i++)
     {
         MegaNode *child = children->get(i);
-        size_t l = localpath.size();
+        
+        ScopedLengthRestore restoreLen(localpath);
+        localpath.separatorAppend(LocalPath::fromName(child->getName(), *client->fsaccess), *client->fsaccess, false);
 
-        string name = child->getName();
-        client->fsaccess->name2local(&name);
-        localpath.append(name);
-
-        string utf8path;
-        client->fsaccess->local2path(&localpath, &utf8path);
+        string utf8path = localpath.toPath(*client->fsaccess);
 
         if (child->getType() == MegaNode::TYPE_FILE)
         {
@@ -24936,8 +24874,6 @@ void MegaFolderDownloadController::downloadFolderNode(MegaNode *node, string *pa
         {
             downloadFolderNode(child, &utf8path);
         }
-
-        localpath.resize(l);
     }
 
     recursive--;
@@ -26479,22 +26415,21 @@ int MegaHTTPServer::onBody(http_parser *parser, const char *b, size_t n)
         {
             httpctx->tmpFileName=httpctx->server->basePath;
             httpctx->tmpFileName.append("httputfile");
-            string suffix, utf8suffix;
-            httpctx->server->fsAccess->tmpnamelocal(&suffix);
-            httpctx->server->fsAccess->local2path(&suffix, &utf8suffix);
-            httpctx->tmpFileName.append(utf8suffix);
+            LocalPath suffix;
+            httpctx->server->fsAccess->tmpnamelocal(suffix);
+            httpctx->tmpFileName.append(suffix.toPath(*httpctx->server->fsAccess));
 
             char ext[8];
-            if (httpctx->server->fsAccess->getextension(&httpctx->path, ext, sizeof ext))
+            LocalPath localpath = LocalPath::fromPath(httpctx->path, *httpctx->server->fsAccess);
+            if (httpctx->server->fsAccess->getextension(localpath, ext, sizeof ext))
             {
                 httpctx->tmpFileName.append(ext);
             }
 
             httpctx->tmpFileAccess = httpctx->server->fsAccess->newfileaccess();
-            string localPath;
-            httpctx->server->fsAccess->path2local(&httpctx->tmpFileName, &localPath);
-            httpctx->server->fsAccess->unlinklocal(&localPath);
-            if (!httpctx->tmpFileAccess->fopen(&localPath, false, true))
+            LocalPath localPath = LocalPath::fromPath(httpctx->tmpFileName, *httpctx->server->fsAccess);
+            httpctx->server->fsAccess->unlinklocal(localPath);
+            if (!httpctx->tmpFileAccess->fopen(localPath, false, true))
             {
                 returnHttpCode(httpctx, 500); //is it ok to have a return here (not int onMessageComplete)?
                 return 0;
@@ -27541,20 +27476,16 @@ int MegaHTTPServer::onMessageComplete(http_parser *parser)
             {
                 httpctx->tmpFileName=httpctx->server->basePath;
                 httpctx->tmpFileName.append("httputfile");
-                string suffix, utf8suffix;
-                httpctx->server->fsAccess->tmpnamelocal(&suffix);
-                httpctx->server->fsAccess->local2path(&suffix, &utf8suffix);
-                httpctx->tmpFileName.append(utf8suffix);
+                httpctx->tmpFileName.append(LocalPath::tmpNameLocal(*httpctx->server->fsAccess).toPath(*httpctx->server->fsAccess));
                 char ext[8];
-                if (httpctx->server->fsAccess->getextension(&httpctx->path, ext, sizeof ext))
+                if (httpctx->server->fsAccess->getextension(LocalPath::fromPath(httpctx->path, *httpctx->server->fsAccess), ext, sizeof ext))
                 {
                     httpctx->tmpFileName.append(ext);
                 }
                 httpctx->tmpFileAccess = httpctx->server->fsAccess->newfileaccess();
-                string localPath;
-                httpctx->server->fsAccess->path2local(&httpctx->tmpFileName, &localPath);
-                httpctx->server->fsAccess->unlinklocal(&localPath);
-                if (!httpctx->tmpFileAccess->fopen(&localPath, false, true))
+                auto tmpFileNamePath = LocalPath::fromPath(httpctx->tmpFileName, *httpctx->server->fsAccess);
+                httpctx->server->fsAccess->unlinklocal(tmpFileNamePath);
+                if (!httpctx->tmpFileAccess->fopen(tmpFileNamePath, false, true))
                 {
                     returnHttpCode(httpctx, 500);
                     delete node;
@@ -28065,9 +27996,8 @@ MegaHTTPContext::~MegaHTTPContext()
     delete node;
     if (tmpFileName.size())
     {
-        string localPath;
-        server->fsAccess->path2local(&tmpFileName, &localPath);
-        server->fsAccess->unlinklocal(&localPath);
+        LocalPath localPath = LocalPath::fromPath(tmpFileName, *server->fsAccess);
+        server->fsAccess->unlinklocal(localPath);
     }
     delete [] messageBody;
     uv_mutex_destroy(&mutex_responses);
@@ -29897,9 +29827,8 @@ MegaFTPContext::~MegaFTPContext()
     }
     if (tmpFileName.size())
     {
-        string localPath;
-        server->fsAccess->path2local(&tmpFileName, &localPath);
-        server->fsAccess->unlinklocal(&localPath);
+        LocalPath localPath = LocalPath::fromPath(tmpFileName, *server->fsAccess);
+        server->fsAccess->unlinklocal(localPath);
         tmpFileName = "";
     }
     uv_mutex_destroy(&mutex_responses);
@@ -29934,9 +29863,8 @@ void MegaFTPContext::onTransferFinish(MegaApi *, MegaTransfer *, MegaError *e)
     }
     if (tmpFileName.size())
     {
-        string localPath;
-        server->fsAccess->path2local(&tmpFileName, &localPath);
-        server->fsAccess->unlinklocal(&localPath);
+        LocalPath localPath = LocalPath::fromPath(tmpFileName, *server->fsAccess);
+        server->fsAccess->unlinklocal(localPath);
         tmpFileName = "";
     }
 }
@@ -30251,23 +30179,21 @@ void MegaFTPDataServer::processReceivedData(MegaTCPContext *tcpctx, ssize_t nrea
         {
             ftpdatactx->tmpFileName = fds->basePath;
             ftpdatactx->tmpFileName.append("ftpstorfile");
-            string suffix, utf8suffix;
-            fds->fsAccess->tmpnamelocal(&suffix);
-            fds->fsAccess->local2path(&suffix, &utf8suffix);
-            ftpdatactx->tmpFileName.append(utf8suffix);
+            LocalPath suffix;
+            fds->fsAccess->tmpnamelocal(suffix);
+            ftpdatactx->tmpFileName.append(suffix.toPath(*fds->fsAccess));
 
             char ext[8];
-            if (ftpdatactx->server->fsAccess->getextension(&fds->controlftpctx->arg1, ext, sizeof ext))
+            if (ftpdatactx->server->fsAccess->getextension(LocalPath::fromPath(fds->controlftpctx->arg1, *ftpdatactx->server->fsAccess), ext, sizeof ext))
             {
                 ftpdatactx->tmpFileName.append(ext);
             }
 
             ftpdatactx->tmpFileAccess = fds->fsAccess->newfileaccess();
-            string localPath;
-            fds->fsAccess->path2local(&ftpdatactx->tmpFileName, &localPath);
-            fds->fsAccess->unlinklocal(&localPath);
+            LocalPath localPath = LocalPath::fromPath(ftpdatactx->tmpFileName, *fds->fsAccess);
+            fds->fsAccess->unlinklocal(localPath);
 
-            if (!ftpdatactx->tmpFileAccess->fopen(&localPath, false, true))
+            if (!ftpdatactx->tmpFileAccess->fopen(localPath, false, true))
             {
                 ftpdatactx->setControlCodeUponDataClose(450);
                 remotePathToUpload = ""; //empty, so that we don't read in the next connections
