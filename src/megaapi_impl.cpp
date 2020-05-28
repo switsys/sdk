@@ -1173,52 +1173,6 @@ string MegaNodePrivate::getLocalPath()
     return localPath;
 }
 
-
-bool WildcardMatch(const char *pszString, const char *pszMatch)
-//  cf. http://www.planet-source-code.com/vb/scripts/ShowCode.asp?txtCodeId=1680&lngWId=3
-{
-    const char *cp = nullptr;
-    const char *mp = nullptr;
-
-    while ((*pszString) && (*pszMatch != '*'))
-    {
-        if ((*pszMatch != *pszString) && (*pszMatch != '?'))
-        {
-            return false;
-        }
-        pszMatch++;
-        pszString++;
-    }
-
-    while (*pszString)
-    {
-        if (*pszMatch == '*')
-        {
-            if (!*++pszMatch)
-            {
-                return true;
-            }
-            mp = pszMatch;
-            cp = pszString + 1;
-        }
-        else if ((*pszMatch == *pszString) || (*pszMatch == '?'))
-        {
-            pszMatch++;
-            pszString++;
-        }
-        else
-        {
-            pszMatch = mp;
-            pszString = cp++;
-        }
-    }
-    while (*pszMatch == '*')
-    {
-        pszMatch++;
-    }
-    return !*pszMatch;
-}
-
 bool MegaApiImpl::is_syncable(Sync *sync, const char *name, string *localpath)
 {
     // Don't sync these system files from OS X
@@ -1229,7 +1183,7 @@ bool MegaApiImpl::is_syncable(Sync *sync, const char *name, string *localpath)
 
     for (unsigned int i = 0; i < excludedNames.size(); i++)
     {
-        if (WildcardMatch(name, excludedNames[i].c_str()))
+        if (wildcardMatch(name, excludedNames[i].c_str()))
         {
             return false;
         }
@@ -1252,7 +1206,7 @@ bool MegaApiImpl::is_syncable(Sync *sync, const char *name, string *localpath)
 
         for (unsigned int i = 0; i < excludedPaths.size(); i++)
         {
-            if (WildcardMatch(path, excludedPaths[i].c_str()))
+            if (wildcardMatch(path, excludedPaths[i].c_str()))
             {
                 return false;
             }
