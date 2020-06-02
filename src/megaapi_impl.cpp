@@ -1181,6 +1181,11 @@ bool MegaApiImpl::is_syncable(Sync *sync, const char *name, string *localpath)
         return false;
     }
 
+    if (Sync::IGNORE_FILENAME == name)
+    {
+        return true;
+    }
+
     for (unsigned int i = 0; i < excludedNames.size(); i++)
     {
         if (wildcardMatch(name, excludedNames[i].c_str()))

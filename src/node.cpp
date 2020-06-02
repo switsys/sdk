@@ -1857,6 +1857,74 @@ LocalNode* LocalNode::unserialize(Sync* sync, const string* d)
     return l;
 }
 
+bool LocalNode::isExcluded(const string& name) const
+{
+    for (auto *node = this; node; node = node->parent)
+    {
+        if (wildcardMatch(name.c_str(), node->mExcludedNames))
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
+bool LocalNode::isIncluded(const string& name) const
+{
+    return !isExcluded(name);
+}
+
+void LocalNode::loadFilters(string& rootPath)
+{
+    assert(type == FOLDERNODE);
+
+    const size_t size = rootPath.size();
+
+    rootPath.append(sync->client->fsaccess->localseparator);
+    rootPath.append(Sync::IGNORE_FILENAME);
+
+    auto fileAccess = sync->client->fsaccess->newfileaccess(false);
+    const bool opened = fileAccess->fopen(&rootPath, true, false);
+
+    rootPath.resize(size);
+
+    std::vector<string> patterns;
+
+    if (opened && fileAccess->type == FILENODE)
+    {
+        readLines(*fileAccess, patterns);
+    }
+
+    mExcludedNames.swap(patterns);
+}
+
+void LocalNode::loadFilters()
+{
+    assert(type == FOLDERNODE);
+
+    string path;
+
+    getlocalpath(&path);
+    loadFilters(path);
+}
+
+bool isIgnoreFile(const LocalNode& node)
+{
+    return node.type == FILENODE
+           && node.name == Sync::IGNORE_FILENAME;
+}
+
+bool isIgnoreFile(const Node& node)
+{
+    attr_map::const_iterator name_it;
+
+    return node.type == FILENODE
+           && ((name_it = node.attrs.map.find('n'))
+               != node.attrs.map.end())
+           && name_it->second == Sync::IGNORE_FILENAME;
+}
+
 #endif
 
 void Fingerprints::newnode(Node* n)

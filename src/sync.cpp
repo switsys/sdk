@@ -33,6 +33,7 @@
 
 namespace mega {
 
+const string Sync::IGNORE_FILENAME = ".megaignore";
 const int Sync::SCANNING_DELAY_DS = 5;
 const int Sync::EXTRA_SCANNING_DELAY_DS = 150;
 const int Sync::FILE_UPDATE_DELAY_DS = 30;
@@ -1140,12 +1141,10 @@ bool Sync::assignfsids()
 
 // scan localpath, add or update child nodes, call recursively for folder nodes
 // localpath must be prefixed with Sync
-bool Sync::scan(string* localpath, FileAccess* fa)
+bool Sync::scan(string* localpath, FileAccess* fa, LocalNode* localnode)
 {
-    if (fa)
-    {
-        assert(fa->type == FOLDERNODE);
-    }
+    assert(!fa || fa->type == FOLDERNODE);
+
     if (isPathSyncable(*localpath, localdebris, client->fsaccess->localseparator))
     {
         DirAccess* da;
@@ -1166,8 +1165,54 @@ bool Sync::scan(string* localpath, FileAccess* fa)
         {
             size_t t = localpath->size();
 
-            while (da->dnext(localpath, &localname, client->followsymlinks))
+            // prioritize handling of ignorefiles as they dictate how we
+            // should handle this directory's contents.
+            do
             {
+                if (t)
+                {
+                    localpath->append(client->fsaccess->localseparator);
+                }
+
+                localpath->append(IGNORE_FILENAME);
+
+                if (!client->app->sync_syncable(this, IGNORE_FILENAME.c_str(), localpath))
+                {
+                    LOG_debug << "Excluded: " << IGNORE_FILENAME;
+                    break;
+                }
+
+                auto fileaccess = client->fsaccess->newfileaccess(client->followsymlinks);
+                if (fileaccess->isfolder(localpath))
+                {
+                    break;
+                }
+
+                LocalNode* node = nullptr;
+
+                if (initializing)
+                {
+                    node = checkpath(NULL, localpath, NULL, NULL, false, da);
+                }
+
+                if (!node || node == (LocalNode*)~0)
+                {
+                    dirnotify->notify(DirNotify::DIREVENTS, NULL, localpath->data(), localpath->size(), true);
+                }
+            }
+            while (false);
+
+            nodetype_t type;
+            localpath->resize(t);
+
+            while (da->dnext(localpath, &localname, client->followsymlinks, &type))
+            {
+                // ignorefiles are processed above.
+                if (type == FILENODE && localname == IGNORE_FILENAME)
+                {
+                    continue;
+                }
+
                 name = localname;
                 client->fsaccess->local2name(&name, localpath);
 
@@ -1179,7 +1224,8 @@ bool Sync::scan(string* localpath, FileAccess* fa)
                 localpath->append(localname);
 
                 // check if this record is to be ignored
-                if (client->app->sync_syncable(this, name.c_str(), localpath))
+                if (client->app->sync_syncable(this, name.c_str(), localpath)
+                    && localnode->isIncluded(name.c_str()))
                 {
                     // skip the sync's debris folder
                     if (isPathSyncable(*localpath, localdebris, client->fsaccess->localseparator))
@@ -1296,7 +1342,8 @@ LocalNode* Sync::checkpath(LocalNode* l, string* localpath, string* localname, d
         string name = newname.size() ? newname : l->name;
         client->fsaccess->local2name(&name, localpath);
 
-        if (!client->app->sync_syncable(this, name.c_str(), &tmppath))
+        if (!client->app->sync_syncable(this, name.c_str(), &tmppath)
+            || (parent && parent->isExcluded(name.c_str())))
         {
             LOG_debug << "Excluded: " << path;
             return NULL;
@@ -1356,7 +1403,7 @@ LocalNode* Sync::checkpath(LocalNode* l, string* localpath, string* localname, d
 
                     if (l->type == FOLDERNODE)
                     {
-                        scan(localname ? localpath : &tmppath, fa.get());
+                        scan(localname ? localpath : &tmppath, fa.get(), l);
                     }
                     else
                     {
@@ -1383,6 +1430,13 @@ LocalNode* Sync::checkpath(LocalNode* l, string* localpath, string* localname, d
             {
                 LOG_verbose << "New file. FaType: " << fa->type << "  FaSize: " << fa->size << "  FaMtime: " << fa->mtime;
             }
+
+            if (fa->type == FILENODE && fname == IGNORE_FILENAME)
+            {
+                assert(parent);
+                parent->loadFilters();
+            }
+
             return NULL;
         }
 
@@ -1686,7 +1740,7 @@ LocalNode* Sync::checkpath(LocalNode* l, string* localpath, string* localname, d
                     // immediately scan folder to detect deviations from cached state
                     if (fullscan && fa->type == FOLDERNODE)
                     {
-                        scan(localname ? localpath : &tmppath, fa.get());
+                        scan(localname ? localpath : &tmppath, fa.get(), it->second);
                     }
                 }
                 else if (fa->mIsSymLink)
@@ -1700,6 +1754,12 @@ LocalNode* Sync::checkpath(LocalNode* l, string* localpath, string* localname, d
                     LOG_debug << "New localnode.  Parent: " << (parent ? parent->name : "NO");
                     l = new LocalNode;
                     l->init(this, fa->type, parent, localname ? localpath : &tmppath, client->fsaccess->fsShortname(localname ? *localpath : tmppath));
+
+                    if (isIgnoreFile(*l))
+                    {
+                        assert(parent);
+                        parent->loadFilters();
+                    }
 
                     if (fa->fsidvalid)
                     {
@@ -1718,7 +1778,7 @@ LocalNode* Sync::checkpath(LocalNode* l, string* localpath, string* localname, d
             {
                 if (newnode)
                 {
-                    scan(localname ? localpath : &tmppath, fa.get());
+                    scan(localname ? localpath : &tmppath, fa.get(), l);
                     client->app->syncupdate_local_folder_addition(this, l, path.c_str());
 
                     if (!isroot)

@@ -386,10 +386,26 @@ struct MEGA_API LocalNode : public File
     static LocalNode* unserialize( Sync* sync, const string* sData );
 
     ~LocalNode();
+
+    // true if name should be ignored.
+    bool isExcluded(const string& name) const;
+
+    // true if name should not be ignored.
+    bool isIncluded(const string& name) const;
+
+    // destructively updates filters.
+    void loadFilters(string& rootPath);
+    void loadFilters();
+
+private:
+    string_vector mExcludedNames;
 };
 
 template <> inline NewNode*& crossref_other_ptr_ref<LocalNode, NewNode>(LocalNode* p) { return p->newnode.ptr; }
 template <> inline LocalNode*& crossref_other_ptr_ref<NewNode, LocalNode>(NewNode* p) { return p->localnode.ptr; }
+
+// true if node identifies an ignorefile.
+bool isIgnoreFile(const LocalNode& node);
 
 #endif
 
