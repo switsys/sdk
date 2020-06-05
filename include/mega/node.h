@@ -23,9 +23,10 @@
 #ifndef MEGA_NODE_H
 #define MEGA_NODE_H 1
 
-#include "filefingerprint.h"
-#include "file.h"
 #include "attrmap.h"
+#include "file.h"
+#include "filefingerprint.h"
+#include "filter.h"
 
 namespace mega {
 struct MEGA_API NodeCore
@@ -275,6 +276,7 @@ inline bool Node::keyApplied() const
 
 
 #ifdef ENABLE_SYNC
+
 struct MEGA_API LocalNode : public File
 {
     class Sync* sync = nullptr;
@@ -444,7 +446,7 @@ private:
     // purges pending directory notification for this node and its children.
     void purgePendingNotifications();
 
-    string_vector mExcludedNames;
+    FilterChain mFilters;
 };
 
 template <> inline NewNode*& crossref_other_ptr_ref<LocalNode, NewNode>(LocalNode* p) { return p->newnode.ptr; }

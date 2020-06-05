@@ -1144,6 +1144,7 @@ bool PublicLink::isExpired()
 }
 
 #ifdef ENABLE_SYNC
+
 // set, change or remove LocalNode's parent and name/localname/slocalname.
 // newlocalpath must be a full path and must not point to an empty string.
 // no shortname allowed as the last path component.
@@ -2004,7 +2005,7 @@ void LocalNode::clearFilters()
 {
     LOG_verbose << "Clearing filters for " << name;
 
-    mExcludedNames.clear();
+    mFilters.clear();
 }
 
 void LocalNode::clearParentFilterOnDeletion(const bool clear)
@@ -2020,15 +2021,66 @@ bool LocalNode::isBusy() const
 
 bool LocalNode::isExcluded(const string& name) const
 {
-    for (auto *node = this; node; node = node->parent)
+    string path;
+    getlocalpath(&path);
+
+    if (mPruned)
     {
-        if (node->mPruned || wildcardMatch(name.c_str(), node->mExcludedNames))
-        {
-            return true;
-        }
+        LOG_verbose << name << " excluded by " << path;
+        return true;
     }
 
-    return false;
+    string_pair namePath;
+    auto* node = this;
+
+    namePath.first = name;
+    namePath.second = name;
+
+    // check for an exclusion.
+    for ( ; node; node = node->parent)
+    {
+        if (node->mFilters.excluded(namePath, node != this))
+        {
+            break;
+        }
+
+        namePath.second.insert(0, namePath.second.size() > 0, '/');
+        namePath.second.insert(0, node->name);
+    }
+    
+    // don't bother testing for an inclusion if we weren't excluded.
+    if (!node)
+    {
+        return false;
+    }
+
+    namePath.second = name;
+
+    // check for an explicit inclusion.
+    for (node = this; node; node = node->parent)
+    {
+        if (node->mFilters.included(namePath, node != this))
+        {
+            if (node != this)
+            {
+                node->getlocalpath(&path);
+            }
+
+            LOG_verbose << name << " explicitly included by " << path;
+            return false;
+        }
+
+        namePath.second.insert(0, namePath.second.size() > 0, '/');
+        namePath.second.insert(0, node->name);
+    }
+
+    if (node && node != this)
+    {
+        node->getlocalpath(&path);
+    }
+
+    LOG_verbose << name << " excluded by " << path;
+    return true;
 }
 
 bool LocalNode::isFilterDownloading(const remotenode_map& children) const
@@ -2091,7 +2143,7 @@ void LocalNode::loadFilters(string& rootPath)
 {
     assert(type == FOLDERNODE);
 
-    LOG_verbose << "Loading filters for " << name;
+    LOG_verbose << "Loading filters for " << rootPath;
 
     const size_t size = rootPath.size();
 
@@ -2103,14 +2155,24 @@ void LocalNode::loadFilters(string& rootPath)
 
     rootPath.resize(size);
 
-    std::vector<string> patterns;
+    FilterChain filters;
 
-    if (opened && fileAccess->type == FILENODE)
+    if (opened)
     {
-        readLines(*fileAccess, patterns);
+        if (filters.load(*fileAccess))
+        {
+            LOG_verbose << "Filters loaded successfully.";
+            mFilters = std::move(filters);
+        }
+        else
+        {
+            LOG_verbose << "Error loading filters.";
+        }
     }
-
-    mExcludedNames.swap(patterns);
+    else
+    {
+        LOG_debug << "Unable to open filter file.";
+    }
 }
 
 void LocalNode::loadFilters()

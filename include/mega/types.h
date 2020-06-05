@@ -449,6 +449,7 @@ typedef list<HttpReqCommandPutFA*> putfa_list;
 typedef map<handle, PendingContactRequest*> handlepcr_map;
 
 // Type-Value (for user attributes)
+typedef pair<string, string> string_pair;
 typedef vector<string> string_vector;
 typedef map<string, string> string_map;
 typedef string_map TLV_map;

@@ -33,6 +33,7 @@ src_libmega_la_SOURCES += src/commands.cpp
 src_libmega_la_SOURCES += src/db.cpp
 src_libmega_la_SOURCES += src/fileattributefetch.cpp
 src_libmega_la_SOURCES += src/file.cpp
+src_libmega_la_SOURCES += src/filter.cpp
 src_libmega_la_SOURCES += src/filefingerprint.cpp
 src_libmega_la_SOURCES += src/filesystem.cpp
 src_libmega_la_SOURCES += src/gfx.cpp
