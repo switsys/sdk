@@ -12405,8 +12405,8 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
             fsaccess->name2local(&localname, localpath);
             localpath->append(fsaccess->localseparator);
             localpath->append(localname);
-            if (app->sync_syncable(l->sync, ait->second.c_str(), localpath, *it)
-                && l->isIncluded(ait->second.c_str()))
+
+            if (l->isIncluded(ait->second))
             {
                 addchild(&nchildren, &ait->second, &remote, &strings, &l->sync->localdebris);
             }

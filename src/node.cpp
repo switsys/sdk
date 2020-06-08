@@ -2030,11 +2030,10 @@ bool LocalNode::isExcluded(const string& name) const
         return true;
     }
 
-    string_pair namePath;
+    string_pair namePath(name, name);
+    string localPath(name);
     auto* node = this;
-
-    namePath.first = name;
-    namePath.second = name;
+    auto* separator = FileSystemAccess::getPathSeparator();
 
     // check for an exclusion.
     for ( ; node; node = node->parent)
@@ -2044,26 +2043,52 @@ bool LocalNode::isExcluded(const string& name) const
             break;
         }
 
+        // local path.
+        localPath.insert(0, localPath.size() > 0, *separator);
+        localPath.insert(0, node->name);
+
+        // normalized path.
+        // separator is always '/'.
         namePath.second.insert(0, namePath.second.size() > 0, '/');
         namePath.second.insert(0, node->name);
     }
     
-    // don't bother testing for an inclusion if we weren't excluded.
-    if (!node)
+    if (node)
     {
-        return false;
+        // excluded by some parent.
+        if (node != this)
+        {
+            // recompute path if necessary for logging purposes.
+            node->getlocalpath(&path);
+        }
+    }
+    else
+    {
+        // check static rules if name wasn't excluded by any parent.
+        auto& app = *sync->client->app;
+
+        // don't bother testing for an inclusion if we weren't excluded.
+        if (app.sync_syncable(sync, name.c_str(), &localPath))
+        {
+            return false;
+        }
+        else
+        {
+            path = "static rule";
+        }
     }
 
     namePath.second = name;
 
     // check for an explicit inclusion.
-    for (node = this; node; node = node->parent)
+    for (auto *inode = this; inode; inode = inode->parent)
     {
-        if (node->mFilters.included(namePath, node != this))
+        if (inode->mFilters.included(namePath, inode != this))
         {
-            if (node != this)
+            if (inode != node)
             {
-                node->getlocalpath(&path);
+                // recompute path only if necessary.
+                inode->getlocalpath(&path);
             }
 
             LOG_verbose << name << " explicitly included by " << path;
@@ -2071,12 +2096,7 @@ bool LocalNode::isExcluded(const string& name) const
         }
 
         namePath.second.insert(0, namePath.second.size() > 0, '/');
-        namePath.second.insert(0, node->name);
-    }
-
-    if (node && node != this)
-    {
-        node->getlocalpath(&path);
+        namePath.second.insert(0, inode->name);
     }
 
     LOG_verbose << name << " excluded by " << path;
