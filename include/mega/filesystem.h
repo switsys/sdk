@@ -265,6 +265,19 @@ struct NotificationDeque : ThreadSafeDeque<Notification>
             }
         }
     }
+
+    void replaceLocalNodePointers(const string& path, LocalNode* value)
+    {
+        std::lock_guard<std::mutex> g(m);
+
+        for (auto &n : mNotifications)
+        {
+            if (isSubpathOf(n.path, path))
+            {
+                n.localnode = (LocalNode*)~0;
+            }
+        }
+    }
 };
 
 // generic filesystem change notification

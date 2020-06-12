@@ -12450,15 +12450,38 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
         }
     }
 
-    // remove remote items that exist locally from hash, recurse into existing folders
-    for (localnode_map::iterator lit = l->children.begin(); lit != l->children.end(); )
+    // was this node's filter being downloaded?
+    if (l->isFilterPending())
     {
-        LocalNode* ll = lit->second;
+        // is it still downloading?
+        if (!l->isFilterDownloading(nchildren))
+        {
+            // apply newly downloaded filter.
+            l->loadFilters();
+            l->applyFilters(true);
+            l->scan(true);
+        }
+        else
+        {
+            LOG_verbose << "Skipping syncdown of "
+                        << l->name
+                        << " as filter is pending.";
+        }
+
+        // remote changes will be pulled during next syncdown.
+        return false;
+    }
+
+    const size_t t = localpath->size();
+
+    // remove remote items that exist locally from hash, recurse into existing folders
+    for (auto &lit : inSyncOrder(l->children))
+    {
+        LocalNode* ll = lit.second;
 
         rit = nchildren.find(&ll->name);
 
-        size_t t = localpath->size();
-
+        localpath->resize(t);
         localpath->append(fsaccess->localseparator);
         localpath->append(ll->localname);
 
@@ -12528,6 +12551,16 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
                     }
 
                     rit->second->localnode = (LocalNode*)~0;
+
+                    // if we're downloading an ignore file, make sure it's the only node we process.
+                    // this is because it dictates what other changes in this tree we care about.
+                    if (isIgnoreFile(*ll))
+                    {
+                        remotenode_map children;
+                        children[rit->first] = rit->second;
+                        children.swap(nchildren);
+                        break;
+                    }
                 }
             }
             else
@@ -12546,8 +12579,6 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
 
                 nchildren.erase(rit);
             }
-
-            lit++;
         }
         else if (rubbish && ll->deleted)    // no corresponding remote node: delete local item
         {
@@ -12573,78 +12604,82 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
 
             if (ll->deleted)
             {
+                const bool removingIgnoreFile = isIgnoreFile(*ll);
+
                 // attempt deletion and re-queue for retry in case of a transient failure
                 ll->treestate(TREESTATE_SYNCING);
 
                 if (l->sync->movetolocaldebris(localpath) || !fsaccess->transient_error)
                 {
                     DBTableTransactionCommitter committer(tctable);
-                    delete lit++->second;
+                    delete lit.second;
                 }
                 else
                 {
                     fsaccess->local2path(localpath, &blockedfile);
                     LOG_warn << "Transient error deleting " << blockedfile;
                     success = false;
-                    lit++;
+                }
+
+                // don't process any other children of this tree if we've
+                // removed an ignore file as the filters have changed.
+                if (removingIgnoreFile)
+                {
+                    nchildren.clear();
+                    break;
                 }
             }
         }
-        else
-        {
-            lit++;
-        }
-
-        localpath->resize(t);
     }
 
     // create/move missing local folders / FolderNodes, initiate downloads of
     // missing local files
-    for (rit = nchildren.begin(); rit != nchildren.end(); rit++)
+    for (auto &rit : inSyncOrder(nchildren))
     {
-        size_t t = localpath->size();
+        localname = rit.second->attrs.map.find('n')->second;
 
-        localname = rit->second->attrs.map.find('n')->second;
+        localpath->resize(t);
 
         fsaccess->name2local(&localname, localpath);
+
         localpath->append(fsaccess->localseparator);
         localpath->append(localname);
 
         string utf8path;
         fsaccess->local2path(localpath, &utf8path);
-        LOG_debug << "Unsynced remote node in syncdown: " << utf8path << " Nsize: " << rit->second->size
-                  << " Nmtime: " << rit->second->mtime << " Nhandle: " << LOG_NODEHANDLE(rit->second->nodehandle);
+        LOG_debug << "Unsynced remote node in syncdown: " << utf8path << " Nsize: " << rit.second->size
+                  << " Nmtime: " << rit.second->mtime << " Nhandle: " << LOG_NODEHANDLE(rit.second->nodehandle);
 
         // does this node already have a corresponding LocalNode under
         // a different name or elsewhere in the filesystem?
-        if (rit->second->localnode && rit->second->localnode != (LocalNode*)~0)
+        if (rit.second->localnode && rit.second->localnode != (LocalNode*)~0)
         {
-            LOG_debug << "has a previous localnode: " << rit->second->localnode->name;
-            if (rit->second->localnode->parent)
+            LOG_debug << "has a previous localnode: " << rit.second->localnode->name;
+            if (rit.second->localnode->parent)
             {
-                LOG_debug << "with a previous parent: " << rit->second->localnode->parent->name;
+                LOG_debug << "with a previous parent: " << rit.second->localnode->parent->name;
                 string curpath;
 
-                rit->second->localnode->getlocalpath(&curpath);
-                rit->second->localnode->treestate(TREESTATE_SYNCING);
+                rit.second->localnode->getlocalpath(&curpath);
+                rit.second->localnode->treestate(TREESTATE_SYNCING);
 
                 LOG_debug << "Renaming/moving from the previous location to the new one";
                 if (fsaccess->renamelocal(&curpath, localpath))
                 {
                     fsaccess->local2path(localpath, &localname);
-                    app->syncupdate_local_move(rit->second->localnode->sync,
-                                               rit->second->localnode, localname.c_str());
+                    app->syncupdate_local_move(rit.second->localnode->sync,
+                                               rit.second->localnode, localname.c_str());
 
                     // update LocalNode tree to reflect the move/rename
-                    rit->second->localnode->setnameparent(l, localpath, fsaccess->fsShortname(*localpath));
+                    rit.second->localnode->setnameparent(l, localpath, fsaccess->fsShortname(*localpath));
 
-                    rit->second->localnode->sync->statecacheadd(rit->second->localnode);
+                    rit.second->localnode->sync->statecacheadd(rit.second->localnode);
 
                     // update filenames so that PUT transfers can continue seamlessly
                     updateputs();
                     syncactivity = true;
 
-                    rit->second->localnode->treestate(TREESTATE_SYNCED);
+                    rit.second->localnode->treestate(TREESTATE_SYNCED);
                 }
                 else if (success && fsaccess->transient_error)
                 {
@@ -12652,6 +12687,11 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
                     fsaccess->local2path(&curpath, &blockedfile);
                     LOG_debug << "Transient error moving localnode " << blockedfile;
                     success = false;
+                }
+
+                if (isIgnoreFile(*rit.second->localnode))
+                {
+                    break;
                 }
             }
             else
@@ -12663,11 +12703,11 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
         {
             LOG_debug << "doesn't have a previous localnode";
             // missing node is not associated with an existing LocalNode
-            if (rit->second->type == FILENODE)
+            if (rit.second->type == FILENODE)
             {
                 bool download = true;
                 auto f = fsaccess->newfileaccess(false);
-                if (rit->second->localnode != (LocalNode*)~0
+                if (rit.second->localnode != (LocalNode*)~0
                         && (f->fopen(localpath) || f->type == FOLDERNODE))
                 {
                     if (f->mIsSymLink && l->sync->movetolocaldebris(localpath))
@@ -12681,22 +12721,30 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
                     }
                 }
                 f.reset();
-                rit->second->localnode = NULL;
+                rit.second->localnode = NULL;
 
                 // start fetching this node, unless fetch is already in progress
                 // FIXME: to cover renames that occur during the
                 // download, reconstruct localname in complete()
-                if (download && !rit->second->syncget)
+                if (download && !rit.second->syncget)
                 {
                     LOG_debug << "Start fetching file node";
                     fsaccess->local2path(localpath, &localname);
-                    app->syncupdate_get(l->sync, rit->second, localname.c_str());
+                    app->syncupdate_get(l->sync, rit.second, localname.c_str());
 
-                    rit->second->syncget = new SyncFileGet(l->sync, rit->second, localpath);
+                    rit.second->syncget = new SyncFileGet(l->sync, rit.second, localpath);
                     nextreqtag();
                     DBTableTransactionCommitter committer(tctable); // TODO: use one committer for all files in the loop, without calling syncdown() recursively
-                    startxfer(GET, rit->second->syncget, committer);
+                    startxfer(GET, rit.second->syncget, committer);
                     syncactivity = true;
+
+                    // bail early if we're downloading a new ignore file.
+                    // i.e. don't do anything else until the filters are stable.
+                    if (isIgnoreFile(*rit.second))
+                    {
+                        l->isFilterPending(true);
+                        break;
+                    }
                 }
             }
             else
@@ -12716,7 +12764,7 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
                     {
                         LOG_debug << "Local folder created, continuing syncdown";
 
-                        ll->setnode(rit->second);
+                        ll->setnode(rit.second);
                         ll->sync->statecacheadd(ll);
 
                         if (!syncdown(ll, localpath, rubbish) && success)
@@ -12742,9 +12790,9 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
                 }
             }
         }
-
-        localpath->resize(t);
     }
+
+    localpath->resize(t);
 
     return success;
 }
@@ -12828,11 +12876,39 @@ bool MegaClient::syncup(LocalNode* l, dstime* nds)
         }
     }
 
+    // is this node's filter stable?
+    if (l->isFilterPending())
+    {
+        // is the filter still downloading?
+        if (!l->isFilterDownloading(nchildren))
+        {
+            // apply newly downloaded filter.
+            l->loadFilters();
+            l->applyFilters(true);
+            l->scan(true);
+        }
+        else
+        {
+            LOG_verbose << "Skipping syncup of "
+                        << l->name 
+                        << " as filter is pending.";
+        }
+
+        // queue further syncup.
+        return false;
+    }
+
     // check for elements that need to be created, deleted or updated on the
     // remote side
     for (localnode_map::iterator lit = l->children.begin(); lit != l->children.end(); lit++)
     {
         LocalNode* ll = lit->second;
+
+        if (ll->isPruned())
+        {
+            LOG_verbose << "Skipping syncup of pruned file " << ll->name;
+            continue;
+        }
 
         if (ll->deleted)
         {

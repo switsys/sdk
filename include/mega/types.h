@@ -284,6 +284,8 @@ typedef enum { SYNC_FAILED = -2, SYNC_CANCELED = -1, SYNC_INITIALSCAN = 0, SYNC_
 typedef enum { SYNCDEL_NONE, SYNCDEL_DELETED, SYNCDEL_INFLIGHT, SYNCDEL_BIN,
                SYNCDEL_DEBRIS, SYNCDEL_DEBRISDAY, SYNCDEL_FAILED } syncdel_t;
 
+typedef list<LocalNode*> localnode_list;
+
 typedef vector<LocalNode*> localnode_vector;
 
 typedef map<handle, LocalNode*> handlelocalnode_map;

@@ -387,30 +387,87 @@ struct MEGA_API LocalNode : public File
 
     ~LocalNode();
 
+    // recursively prune excluded children.
+    void applyFilters(const bool clearPending = false);
+
+    // clear filters.
+    void clearFilters();
+
+    // specify whether we should clear our parent's filters when we are deleted.
+    void clearParentFilterOnDeletion(const bool clear);
+
+    // true if this node is pending or syncing.
+    bool isBusy() const;
+
     // true if name should be ignored.
     bool isExcluded(const string& name) const;
 
+    // true if this node's filter is downloading.
+    bool isFilterDownloading(const remotenode_map& children) const;
+
+    // specify whether this node's filter is pending.
+    void isFilterPending(const bool pending);
+
+    // true if this node's filter is pending.
+    bool isFilterPending() const;
+
     // true if name should not be ignored.
     bool isIncluded(const string& name) const;
+
+    // true if this node can be pruned.
+    bool isPruned() const;
 
     // destructively updates filters.
     void loadFilters(string& rootPath);
     void loadFilters();
 
+    // issue a scan for this subtree.
+    void scan(const bool full = false);
+
 private:
+    // filter flags.
+    struct
+    {
+        // true if we should clear our parent's filter when we are deleted.
+        bool mClearParentFilterOnDeletion : 1;
+
+        // true if our filter is currently being downloaded.
+        bool mFilterPending : 1;
+
+        // true if some parent of ours has a pending filter.
+        bool mParentFilterPending : 1;
+
+        // true if this node is being or should be pruned.
+        bool mPruned : 1;
+    };
+
+    // purges pending directory notification for this node and its children.
+    void purgePendingNotifications();
+
     string_vector mExcludedNames;
 };
 
 template <> inline NewNode*& crossref_other_ptr_ref<LocalNode, NewNode>(LocalNode* p) { return p->newnode.ptr; }
 template <> inline LocalNode*& crossref_other_ptr_ref<NewNode, LocalNode>(NewNode* p) { return p->localnode.ptr; }
 
+// returns a list of children in "sync order."
+// i.e. ignore files, files, directories.
+list<pair<const string*, LocalNode*>> inSyncOrder(const localnode_map& children);
+list<pair<const string*, Node*>> inSyncOrder(const remotenode_map& children);
+
+// true if x is above y.
+bool isAbove(const LocalNode& x, const LocalNode& y);
+
+// true if x is below y.
+bool isBelow(const LocalNode& x, const LocalNode& y);
+
 // true if node identifies an ignorefile.
 bool isIgnoreFile(const LocalNode& node);
+bool isIgnoreFile(const Node& node);
 
-#endif
+#endif /* ENABLE_SYNC */
 
 } // namespace
 
+#endif /* ! MEGA_NODE_H */
 
-
-#endif

@@ -605,6 +605,9 @@ public:
 
 };
 
+// true if x is a subpath of y.
+bool isSubpathOf(const string &x, const string &y);
+
 bool readLines(FileAccess& ifAccess, string_vector& destination);
 bool readLines(InputStreamAccess& isAccess, string_vector& destination);
 bool readLines(const std::string& input, string_vector& destination);

@@ -2440,6 +2440,25 @@ void MegaClientAsyncQueue::asyncThreadLoop()
     }
 }
 
+bool isSubpathOf(const string &x, const string &y)
+{
+    const char sep = *FileSystemAccess::getPathSeparator();
+
+    // x is smaller than y so x cannot be a subpath of y.
+    if (x.size() < y.size())
+    {
+        return false;
+    }
+
+    // y is not a prefix of x so x cannot be a subpath of y.
+    if (x.compare(0, y.size(), y))
+    {
+        return false;
+    }
+
+    return x.size() == y.size() || x[y.size()] == sep;
+}
+
 bool readLines(FileAccess& ifAccess, string_vector& destination)
 {
     FileInputStream isAccess(&ifAccess);
