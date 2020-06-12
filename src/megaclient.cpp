@@ -12389,13 +12389,14 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
     // build child hash - nameclash resolution: use newest/largest version
     for (node_list::iterator it = l->node->children.begin(); it != l->node->children.end(); it++)
     {
-        attr_map::iterator ait;        
+        Node& remote = *(*it);
+        attr_map::iterator ait;
 
         // node must be syncable, alive, decrypted and have its name defined to
         // be considered - also, prevent clashes with the local debris folder
-        if (((*it)->syncdeleted == SYNCDEL_NONE
-             && !(*it)->attrstring
-             && (ait = (*it)->attrs.map.find('n')) != (*it)->attrs.map.end()
+        if ((remote.syncdeleted == SYNCDEL_NONE
+             && !remote.attrstring
+             && (ait = remote.attrs.map.find('n')) != remote.attrs.map.end()
              && ait->second.size())
          && (l->parent || l->sync->debris != ait->second))
         {
@@ -12406,17 +12407,45 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
             localpath->append(localname);
             if (app->sync_syncable(l->sync, ait->second.c_str(), localpath, *it))
             {
-                addchild(&nchildren, &ait->second, *it, &strings, &l->sync->localdebris);
+                addchild(&nchildren, &ait->second, &remote, &strings, &l->sync->localdebris);
             }
             else
             {
-                LOG_debug << "Node excluded " << LOG_NODEHANDLE((*it)->nodehandle) << "  Name: " << (*it)->displayname();
+                LOG_debug << "Node excluded " << LOG_NODEHANDLE(remote.nodehandle) << "  Name: " << remote.displayname();
+
+                // Does the now-excluded remote have a local associate?
+                if (remote.localnode)
+                {
+                    LocalNode& local = *remote.localnode;
+
+                    // How did the remote node come to be excluded?
+                    // - Was it moved to an excluded parent?
+                    //   - Then the parent must have changed.
+                    // - Was it renamed to an excluded name?
+                    //   - Then the name must have changed.
+                    //
+                    // We need to rubbish the local associate if either of
+                    // these cases are true to remain consistent with the
+                    // cloud.
+                    assert(local.parent);
+
+                    if (local.parent != l || local.name != ait->second)
+                    {
+                        // Rubbish local associate.
+                        local.deleted = true;
+
+                        // Detach the remote so that it isn't rubbished, too.
+                        local.node = nullptr;
+                        remote.localnode = nullptr;
+                    }
+                }
             }
+
             localpath->resize(t);
         }
         else
         {
-            LOG_debug << "Node skipped " << LOG_NODEHANDLE((*it)->nodehandle) << "  Name: " << (*it)->displayname();
+            LOG_debug << "Node skipped " << LOG_NODEHANDLE(remote.nodehandle) << "  Name: " << remote.displayname();
         }
     }
 
