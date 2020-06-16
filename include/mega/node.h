@@ -389,7 +389,7 @@ struct MEGA_API LocalNode : public File
 
     ~LocalNode();
 
-    // recursively prune excluded children.
+    // recursively update child filter state.
     void applyFilters(const bool clearPending = false);
 
     // clear filters.
@@ -416,15 +416,12 @@ struct MEGA_API LocalNode : public File
     // true if name should not be ignored.
     bool isIncluded(const string& name) const;
 
-    // true if this node can be pruned.
-    bool isPruned() const;
+    // true if this node is ignored.
+    bool isIgnored() const;
 
     // destructively updates filters.
     void loadFilters(string& rootPath);
     void loadFilters();
-
-    // issue a scan for this subtree.
-    void scan(const bool full = false);
 
 private:
     // filter flags.
@@ -436,15 +433,18 @@ private:
         // true if our filter is currently being downloaded.
         bool mFilterPending : 1;
 
+        // true if this node is ignored.
+        bool mIgnored : 1;
+
         // true if some parent of ours has a pending filter.
         bool mParentFilterPending : 1;
-
-        // true if this node is being or should be pruned.
-        bool mPruned : 1;
     };
 
     // purges pending directory notification for this node and its children.
     void purgePendingNotifications();
+
+    // regenerates mIgnored and mParentFilterPending based on parent.
+    void recomputeFilterFlags();
 
     FilterChain mFilters;
 };

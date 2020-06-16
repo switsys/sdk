@@ -1194,13 +1194,41 @@ void LocalNode::setnameparent(LocalNode* newparent, string* newlocalpath, std::u
 
         // has the name changed?
         if (localname.size() != newlocalpath->size() - p
-         || memcmp(localname.data(), newlocalpath->data() + p, localname.size()))
+            || memcmp(localname.data(), newlocalpath->data() + p, localname.size()))
         {
             // set new name
             localname.assign(newlocalpath->data() + p, newlocalpath->size() - p);
 
             name = localname;
             sync->client->fsaccess->local2name(&name, newlocalpath);
+
+            // Don't bother updating filter flags if we're a new node.
+            // They've already been set up by init(...).
+            if (!newnode)
+            {
+                // Recompute mIgnored / mParentFilterPending
+                recomputeFilterFlags();
+
+                // Don't bother updating our children if we're moving to a
+                // new location in the hierarchy. The "movement" code below
+                // will take care of that.
+                if (newparent && parent == newparent)
+                {
+                    // Refresh children, if any.
+                    applyFilters();
+                }
+
+                // Have we become ignored?
+                if (mIgnored && node)
+                {
+                    // Recreate the node, if necessary, when we are unignored.
+                    created = false;
+
+                    // Move remote associate to debris.
+                    // Local node no longer has a remote associate.
+                    sync->client->movetosyncdebris(node, sync->inshare);
+                }
+            }
 
             if (node)
             {
@@ -1239,26 +1267,55 @@ void LocalNode::setnameparent(LocalNode* newparent, string* newlocalpath, std::u
         {
             parent = newparent;
 
-            if (!newnode && node)
+            // Recompute mIgnored / mParentFilterPending.
+            recomputeFilterFlags();
+
+            if (!newnode)
             {
-                assert(parent->node);
-                
-                int creqtag = sync->client->reqtag;
-                sync->client->reqtag = sync->tag;
-                LOG_debug << "Moving node: " << node->displayname() << " to " << parent->node->displayname();
-                if (sync->client->rename(node, parent->node, SYNCDEL_NONE, node->parent ? node->parent->nodehandle : UNDEF) == API_EACCESS
-                        && sync != parent->sync)
-                {
-                    LOG_debug << "Rename not permitted. Using node copy/delete";
+                // Refresh children, if any.
+                applyFilters();
 
-                    // save for deletion
-                    todelete = node;
-                }
-                sync->client->reqtag = creqtag;
-
-                if (type == FILENODE)
+                // Do we have a remote associate?
+                if (node)
                 {
-                    ts = TREESTATE_SYNCING;
+                    // Have we become ignored?
+                    if (mIgnored)
+                    {
+                        // Recreate if necesary when we become unignored.
+                        created = false;
+
+                        // Move to debris.
+                        // Local node no longer has a remote associate.
+                        sync->client->movetosyncdebris(node, sync->inshare);
+                    }
+                    else
+                    {
+                        // Move as usual.
+                        assert(parent->node);
+
+                        const int creqtag = sync->client->reqtag;
+                        const handle phandle = node->parent ? node->parent->nodehandle : UNDEF;
+
+                        sync->client->reqtag = sync->tag;
+
+                        LOG_debug << "Moving node: " << node->displayname() << " to " << parent->node->displayname();
+
+                        if (sync->client->rename(node, parent->node, SYNCDEL_NONE, phandle) == API_EACCESS
+                            && sync != parent->sync)
+                        {
+                            LOG_debug << "Rename not permitted. Using node copy/delete";
+
+                            // save for deletion
+                            todelete = node;
+                        }
+
+                        sync->client->reqtag = creqtag;
+
+                        if (type == FILENODE)
+                        {
+                            ts = TREESTATE_SYNCING;
+                        }
+                    }
                 }
             }
 
@@ -1282,6 +1339,7 @@ void LocalNode::setnameparent(LocalNode* newparent, string* newlocalpath, std::u
 
         if (!newnode)
         {
+            // Propagate filter if necessary.
             if (isIgnoreFile(*this))
             {
                 parent->loadFilters();
@@ -1296,30 +1354,25 @@ void LocalNode::setnameparent(LocalNode* newparent, string* newlocalpath, std::u
                         // moved up hierarchy.
                         // refresh from new parent.
                         parent->applyFilters();
-                        parent->scan(true);
                     }
                     else if (isBelow(*parent, *oldParent))
                     {
                         // moved down hierarchy.
                         // refresh from old parent.
                         oldParent->applyFilters();
-                        oldParent->scan(true);
                     }
                     else
                     {
                         // neither parent is a child of the other.
                         // need to refresh both.
                         oldParent->applyFilters();
-                        oldParent->scan(true);
                         parent->applyFilters();
-                        parent->scan(true);
                     }
                 }
                 else
                 {
                     // ignore file has been added.
                     parent->applyFilters();
-                    parent->scan(true);
                 }
             }
             else if (wasIgnoreFile)
@@ -1327,7 +1380,6 @@ void LocalNode::setnameparent(LocalNode* newparent, string* newlocalpath, std::u
                 // ignore file has been renamed.
                 oldParent->clearFilters();
                 oldParent->applyFilters();
-                oldParent->scan(true);
             }
         }
 
@@ -1366,14 +1418,18 @@ void LocalNode::setnameparent(LocalNode* newparent, string* newlocalpath, std::u
             sync->cachenodes();
         }
     }
-    else if (wasIgnoreFile)
+    else
     {
-        // ignore file is being destroyed.
-        if (mClearParentFilterOnDeletion)
+        mParentFilterPending = false;
+
+        if (wasIgnoreFile)
         {
-            assert(parent);
-            parent->clearFilters();
-            parent->scan(true);
+            // ignore file is being destroyed.
+            if (mClearParentFilterOnDeletion)
+            {
+                assert(parent);
+                parent->clearFilters();
+            }
         }
     }
 
@@ -1429,22 +1485,24 @@ void LocalNode::init(Sync* csync, nodetype_t ctype, LocalNode* cparent, string* 
 
     mClearParentFilterOnDeletion = true;
     mFilterPending = false;
+    mIgnored = false;
+    mParentFilterPending = false;
 
     if (cparent)
     {
+        // Will update:
+        // - mIgnored
+        //   - True if any parent is ignored.
+        //   - True if any parent excludes us.
+        // - mParentFilterPending
+        //   - True if any parent has a pending filter.
         setnameparent(cparent, cfullpath, std::move(shortname));
-
-        mParentFilterPending = parent->isFilterPending();
-        mPruned = parent->mPruned;
     }
     else
     {
         localname = *cfullpath;
         slocalname.reset(shortname && *shortname != localname ? shortname.release() : nullptr);
         sync->client->fsaccess->local2path(&localname, &name);
-
-        mParentFilterPending = false;
-        mPruned = false;
     }
 
     scanseqno = sync->scanseqno;
@@ -1622,7 +1680,7 @@ LocalNode::~LocalNode()
     {
         sync->statecachedel(this);
 
-        if (!isPruned())
+        if (!isIgnored())
         {
             if (type == FOLDERNODE)
             {
@@ -1689,8 +1747,8 @@ LocalNode::~LocalNode()
     if (node)
     {
         // move associated node into debris unless the sync is shutting down
-        // or we're being pruned.
-        if (isPruned() || sync->state < SYNC_INITIALSCAN)
+        // or we're being ignored.
+        if (isIgnored() || sync->state < SYNC_INITIALSCAN)
         {
             node->localnode = NULL;
         }
@@ -1941,7 +1999,6 @@ LocalNode* LocalNode::unserialize(Sync* sync, const string* d)
 void LocalNode::applyFilters(const bool clearPending)
 {
     localnode_list pending;
-    localnode_list visited;
 
     LOG_verbose << "Applying filters for " << name;
 
@@ -1951,53 +2008,51 @@ void LocalNode::applyFilters(const bool clearPending)
         pending.emplace_back(child_it.second);
     }
 
-    // mark self as visited.
-    // this avoids us having check if visited is empty.
-    visited.emplace_back(this);
-
     // clear the pending flag if specified.
     mFilterPending &= !clearPending;
 
     while (pending.size())
     {
-        LocalNode* child = pending.front();
+        LocalNode& child = *pending.front();
+        
+        // recompute mParentFilterPending and mPruned.
+        child.recomputeFilterFlags();
 
-        // have we completed processing this subtree?
-        if (child == visited.front())
+        LOG_verbose << child.name
+                    << ": busy? "
+                    << child.isBusy()
+                    << ", ignorable? "
+                    << child.isIgnored()
+                    << ", ignored? "
+                    << child.mIgnored;
+
+        // have we become ignored?
+        if (child.mIgnored)
         {
-            LOG_verbose << child->name
-                        << ": pruned? "
-                        << child->mPruned
-                        << ", purge? "
-                        << child->isPruned();
-
-            // purge the child from memory immediately if it is not busy.
-            if (child->isPruned())
+            // do we have a remote?
+            if (child.node)
             {
-                delete child;
+                // needed so that the node is recreated.
+                child.created = false;
+
+                // detach remote so that moves aren't recorded.
+                child.node->localnode = nullptr;
+                child.node->tag = child.sync->tag;
+                child.node = nullptr;
             }
-
-            pending.pop_front();
-            visited.pop_front();
-
-            continue;
         }
 
-        // first time encountering this subtree.
-        child->mParentFilterPending = child->parent->isFilterPending();
-        child->mPruned = child->parent->isExcluded(child->name);
-
         // push this subtree's children in reverse order.
-        auto i = child->children.rbegin();
-        auto j = child->children.rend();
+        auto i = child.children.rbegin();
+        auto j = child.children.rend();
         
         for ( ; i != j; ++i)
         {
-            pending.emplace_front(i->second);
+            pending.emplace_back(i->second);
         }
 
-        // remember we've visited this subtree.
-        visited.emplace_front(child);
+        // we're done with this node.
+        pending.pop_front();
     }
 }
 
@@ -2024,9 +2079,9 @@ bool LocalNode::isExcluded(const string& name) const
     string path;
     getlocalpath(&path);
 
-    if (mPruned)
+    if (mIgnored)
     {
-        LOG_verbose << name << " excluded by " << path;
+        LOG_verbose << name << " excluded by ignored parent " << path;
         return true;
     }
 
@@ -2154,9 +2209,9 @@ bool LocalNode::isIncluded(const string& name) const
     return !isExcluded(name);
 }
 
-bool LocalNode::isPruned() const
+bool LocalNode::isIgnored() const
 {
-    return mPruned && !isBusy();
+    return mIgnored && !isBusy();
 }
 
 void LocalNode::loadFilters(string& rootPath)
@@ -2225,19 +2280,10 @@ void LocalNode::purgePendingNotifications()
     }
 }
 
-void LocalNode::scan(const bool full)
+void LocalNode::recomputeFilterFlags()
 {
-    assert(sync);
-
-    string path;
-    getlocalpath(&path);
-
-    // purge existing scans for this subtree.
-    purgePendingNotifications();
-
-    // issue a new scan.
-    sync->fullscan |= full;
-    sync->scan(&path, nullptr, this);
+    mIgnored = parent->isExcluded(name);
+    mParentFilterPending = parent->isFilterPending();
 }
 
 list<pair<const string*, LocalNode*>> inSyncOrder(const localnode_map& children)
@@ -2247,7 +2293,7 @@ list<pair<const string*, LocalNode*>> inSyncOrder(const localnode_map& children)
 
     for (auto &child_it : children)
     {
-        if (child_it.second->isPruned())
+        if (child_it.second->isIgnored())
         {
             continue;
         }

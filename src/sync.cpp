@@ -126,14 +126,10 @@ set<string> collectAllPathsInFolder(Sync& sync, MegaApp& app, FileSystemAccess& 
 
         localpath.append(localname);
 
-        // check if this record is to be ignored
-        if (app.sync_syncable(&sync, name.c_str(), &localpath))
+        // skip the sync's debris folder
+        if (isPathSyncable(localpath, localdebris, localseparator))
         {
-            // skip the sync's debris folder
-            if (isPathSyncable(localpath, localdebris, localseparator))
-            {
-                paths.insert(localpath);
-            }
+            paths.insert(localpath);
         }
 
         localpath.resize(localpathSize);
@@ -1176,12 +1172,6 @@ bool Sync::scan(string* localpath, FileAccess* fa, LocalNode* localnode)
 
                 localpath->append(IGNORE_FILENAME);
 
-                if (localnode->isExcluded(IGNORE_FILENAME))
-                {
-                    LOG_debug << "Excluded: " << IGNORE_FILENAME;
-                    break;
-                }
-
                 auto fileaccess = client->fsaccess->newfileaccess(client->followsymlinks);
                 if (fileaccess->isfolder(localpath))
                 {
@@ -1223,29 +1213,21 @@ bool Sync::scan(string* localpath, FileAccess* fa, LocalNode* localnode)
 
                 localpath->append(localname);
 
-                // check if this record is to be ignored
-                if (localnode->isIncluded(name.c_str()))
+                // skip the sync's debris folder
+                if (isPathSyncable(*localpath, localdebris, client->fsaccess->localseparator))
                 {
-                    // skip the sync's debris folder
-                    if (isPathSyncable(*localpath, localdebris, client->fsaccess->localseparator))
+                    LocalNode *l = NULL;
+                    if (initializing)
                     {
-                        LocalNode *l = NULL;
-                        if (initializing)
-                        {
-                            // preload all cached LocalNodes
-                            l = checkpath(NULL, localpath, nullptr, nullptr, false, da);
-                        }
-
-                        if (!l || l == (LocalNode*)~0)
-                        {
-                            // new record: place in notification queue
-                            dirnotify->notify(DirNotify::DIREVENTS, NULL, localpath->data(), localpath->size(), true);
-                        }
+                        // preload all cached LocalNodes
+                        l = checkpath(NULL, localpath, nullptr, nullptr, false, da);
                     }
-                }
-                else
-                {
-                    LOG_debug << "Excluded: " << name;
+
+                    if (!l || l == (LocalNode*)~0)
+                    {
+                        // new record: place in notification queue
+                        dirnotify->notify(DirNotify::DIREVENTS, NULL, localpath->data(), localpath->size(), true);
+                    }
                 }
 
                 localpath->resize(t);
@@ -1341,25 +1323,13 @@ LocalNode* Sync::checkpath(LocalNode* l, string* localpath, string* localname, d
         string name = newname.size() ? newname : l->name;
         client->fsaccess->local2name(&name, localpath);
 
-        // Check if this node is excluded.
-        {
-            auto effectiveParent =
-              parent ? parent : localroot.get();
-
-            if (effectiveParent->isExcluded(name))
-            {
-                LOG_debug << "Excluded: " << path;
-                return nullptr;
-            }
-        }
-
         isroot = l == localroot.get() && !newname.size();
     }
 
     LOG_verbose << "Scanning: " << path << " in=" << initializing << " full=" << fullscan << " l=" << l;
 
     // postpone moving nodes into nonexistent parents
-    if (parent && !parent->node)
+    if (parent && !parent->isIgnored() && !parent->node)
     {
         LOG_warn << "Parent doesn't exist yet: " << path;
         return (LocalNode*)~0;
@@ -1572,7 +1542,6 @@ LocalNode* Sync::checkpath(LocalNode* l, string* localpath, string* localname, d
                             {
                                 l->parent->loadFilters();
                                 l->parent->applyFilters();
-                                l->parent->scan(true);
                             }
 
                             if (isnetwork && l->type == FILENODE)
@@ -1866,7 +1835,6 @@ LocalNode* Sync::checkpath(LocalNode* l, string* localpath, string* localname, d
 
                 l->parent->loadFilters();
                 l->parent->applyFilters();
-                l->parent->scan(true);
             }
 
             if (isnetwork && l->type == FILENODE)

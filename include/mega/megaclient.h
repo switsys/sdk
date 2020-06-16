@@ -1293,6 +1293,7 @@ public:
     void syncupdate();
 
     // create missing folders, copy/start uploading missing files
+    bool syncup(LocalNode*, dstime*, size_t&);
     bool syncup(LocalNode*, dstime*);
 
     // sync putnodes() completion
