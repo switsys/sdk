@@ -8387,76 +8387,68 @@ bool MegaApiImpl::isSynced(MegaNode *n)
     return result;
 }
 
-void MegaApiImpl::setExcludedNames(vector<string> *excludedNames)
+void MegaApiImpl::setExclusionFilters(vector<string> *names,
+                                      vector<string> *paths,
+                                      long long lowerSizeLimit,
+                                      long long upperSizeLimit)
 {
-    sdkMutex.lock();
-    if (!excludedNames)
-    {
-        this->excludedNames.clear();
-        sdkMutex.unlock();
-        return;
-    }
+    SdkMutexGuard guard(sdkMutex);
 
-    this->excludedNames.clear();
-    for (unsigned int i = 0; i < excludedNames->size(); i++)
-    {
-        string name = excludedNames->at(i);
-        fsAccess->normalize(&name);
-        if (name.size())
-        {
-            this->excludedNames.push_back(name);
-            LOG_debug << "Excluded name: " << name;
-        }
-        else
-        {
-            LOG_warn << "Invalid excluded name: " << excludedNames->at(i);
-        }
-    }
-    sdkMutex.unlock();
-}
+    excludedNames.clear();
+    excludedPaths.clear();
 
-void MegaApiImpl::setExcludedPaths(vector<string> *excludedPaths)
-{
-    sdkMutex.lock();
-    if (!excludedPaths)
+    if (names)
     {
-        this->excludedPaths.clear();
-        sdkMutex.unlock();
-        return;
-    }
-
-    this->excludedPaths.clear();
-    for (unsigned int i = 0; i < excludedPaths->size(); i++)
-    {
-        string path = excludedPaths->at(i);
-        fsAccess->normalize(&path);
-        if (path.size())
+        for (const string &name : *names)
         {
-    #if defined(_WIN32) && !defined(WINDOWS_PHONE)
-            if(!PathIsRelativeA(path.c_str()) && ((path.size()<2) || path.compare(0, 2, "\\\\")))
+            string nName = name;
+
+            fsAccess->normalize(&nName);
+
+            if (nName.size())
             {
-                path.insert(0, "\\\\?\\");
+                LOG_debug << "Excluded name: " << nName;
+                excludedNames.emplace_back(std::move(nName));
             }
-    #endif
-            this->excludedPaths.push_back(path);
-            LOG_debug << "Excluded path: " << path;
-        }
-        else
-        {
-            LOG_warn << "Invalid excluded path: " << excludedPaths->at(i);
+            else
+            {
+                LOG_warn << "Invalid excluded name: " << name;
+            }
         }
     }
-    sdkMutex.unlock();
-}
 
-void MegaApiImpl::setExclusionLowerSizeLimit(long long limit)
-{
-    syncLowerSizeLimit = limit;
-}
+    if (paths)
+    {
+        for (const string &path : *paths)
+        {
+            string nPath = path;
 
-void MegaApiImpl::setExclusionUpperSizeLimit(long long limit)
-{
-    syncUpperSizeLimit = limit;
+            fsAccess->normalize(&nPath);
+
+            if (nPath.size())
+            {
+            #if defined(_WIN32) && !defined(WINDOWS_PHONE)
+                if (!PathIsRelativeA(nPath.c_str())
+                    && (nPath.size() < 2 || nPath.compare(0, 2, "\\\\")))
+                {
+                    nPath.insert(0, "\\\\?\\");
+                }
+            #endif /* _WIN32 && !WINDOWS_PHONE */
+
+                LOG_debug << "Excluded path: " << nPath;
+                excludedPaths.emplace_back(std::move(nPath));
+            }
+            else
+            {
+                LOG_warn << "Invalid excluded path: " << nPath;
+            }
+        }
+    }
+
+    syncLowerSizeLimit = lowerSizeLimit;
+    syncUpperSizeLimit = upperSizeLimit;
+
+    client->applyFilters();
 }
 
 void MegaApiImpl::setExcludedRegularExpressions(MegaSync *sync, MegaRegExp *regExp)

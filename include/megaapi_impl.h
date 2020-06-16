@@ -2227,10 +2227,10 @@ class MegaApiImpl : public MegaApp
         int getNumActiveSyncs();
         void stopSyncs(MegaRequestListener *listener=NULL);
         bool isSynced(MegaNode *n);
-        void setExcludedNames(vector<string> *excludedNames);
-        void setExcludedPaths(vector<string> *excludedPaths);
-        void setExclusionLowerSizeLimit(long long limit);
-        void setExclusionUpperSizeLimit(long long limit);
+        void setExclusionFilters(vector<string> *names,
+                                 vector<string> *paths,
+                                 long long lowerSizeLimit,
+                                 long long upperSizeLimit);
         bool moveToLocalDebris(const char *path);
         string getLocalPath(MegaNode *node);
         long long getNumLocalNodes();

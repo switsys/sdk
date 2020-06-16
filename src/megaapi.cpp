@@ -3214,24 +3214,15 @@ int MegaApi::isNodeSyncable(MegaNode *node)
     return pImpl->isNodeSyncable(node);
 }
 
-void MegaApi::setExcludedNames(vector<string> *excludedNames)
+void MegaApi::setExclusionFilters(vector<string> *names,
+                                  vector<string> *paths,
+                                  long long lowerSizeLimit,
+                                  long long upperSizeLimit)
 {
-    pImpl->setExcludedNames(excludedNames);
-}
-
-void MegaApi::setExcludedPaths(vector<string> *excludedPaths)
-{
-    pImpl->setExcludedPaths(excludedPaths);
-}
-
-void MegaApi::setExclusionLowerSizeLimit(long long limit)
-{
-    pImpl->setExclusionLowerSizeLimit(limit);
-}
-
-void MegaApi::setExclusionUpperSizeLimit(long long limit)
-{
-    pImpl->setExclusionUpperSizeLimit(limit);
+    pImpl->setExclusionFilters(names,
+                               paths,
+                               lowerSizeLimit,
+                               upperSizeLimit);
 }
 
 #ifdef USE_PCRE
@@ -3239,9 +3230,8 @@ void MegaApi::setExcludedRegularExpressions(MegaSync *sync, MegaRegExp *regExp)
 {
     pImpl->setExcludedRegularExpressions(sync, regExp);
 }
-#endif
-#endif
-
+#endif /* USE_PCRE */
+#endif /* ENABLE_SYNC */
 
 MegaBackup *MegaApi::getBackupByTag(int tag)
 {

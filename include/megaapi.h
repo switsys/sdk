@@ -12428,29 +12428,19 @@ class MegaApi
         bool isSynced(MegaNode *n);
 
         /**
-         * @brief Set a list of excluded file names
+         * @brief
+         * Sets exclusion filter parameters.
          *
-         * Wildcards (* and ?) are allowed
+         * @param names
+         * List of excluded file names.
+         * Wildcards (* and ?) are allowed.
          *
-         * @param List of excluded file names
-         * @deprecated A more powerful exclusion system based on regular expresions is being developed. This
-         * function will be removed in future updates
-         */
-        void setExcludedNames(std::vector<std::string> *excludedNames);
-
-        /**
-         * @brief Set a list of excluded paths
+         * @param paths
+         * List of excluded paths.
+         * Wildcards (* and ?) are allowed.
          *
-         * Wildcards (* and ?) are allowed
-         *
-         * @param List of excluded paths
-         * @deprecated A more powerful exclusion system based on regular expresions is being developed. This
-         * function will be removed in future updates
-         */
-        void setExcludedPaths(std::vector<std::string> *excludedPaths);
-
-        /**
-         * @brief Set a lower limit for synchronized files
+         * @param lowerSizeLimit
+         * Lower limit for synchronized files.
          *
          * Files with a size lower than this limit won't be synchronized
          * To disable the limit, you can set it to 0
@@ -12458,12 +12448,8 @@ class MegaApi
          * If both limits are enabled and the lower one is greater than the upper one,
          * only files between both limits will be excluded
          *
-         * @param limit Lower limit for synchronized files
-         */
-        void setExclusionLowerSizeLimit(long long limit);
-
-        /**
-         * @brief Set an upper limit for synchronized files
+         * @param upperSizeLimit
+         * Upper limit for synchronized files.
          *
          * Files with a size greater than this limit won't be synchronized
          * To disable the limit, you can set it to 0
@@ -12471,9 +12457,11 @@ class MegaApi
          * If both limits are enabled and the lower one is greater than the upper one,
          * only files between both limits will be excluded
          *
-         * @param limit Upper limit for synchronized files
          */
-        void setExclusionUpperSizeLimit(long long limit);
+        void setExclusionFilters(std::vector<std::string> *names,
+                                 std::vector<std::string> *paths,
+                                 long long lowerSizeLimit,
+                                 long long upperSizeLimit);
 
         /**
          * @brief Move a local file to the local "Debris" folder
