@@ -1996,7 +1996,7 @@ LocalNode* LocalNode::unserialize(Sync* sync, const string* d)
     return l;
 }
 
-bool LocalNode::applyFilters(const bool clearDownloading)
+bool LocalNode::applyFilters()
 {
     localnode_list pending;
     size_t numUnignored = 0;
@@ -2008,9 +2008,6 @@ bool LocalNode::applyFilters(const bool clearDownloading)
     {
         pending.emplace_back(child_it.second);
     }
-
-    // clear the pending flag if specified.
-    mFilterDownloading &= !clearDownloading;
 
     while (pending.size())
     {
@@ -2296,7 +2293,6 @@ void LocalNode::purgePendingNotifications()
 void LocalNode::recomputeFilterFlags()
 {
     mIgnored = parent->isExcluded(name);
-    mParentFilterDownloading = parent->isFilterDownloading();
 }
 
 list<pair<const string*, LocalNode*>> inSyncOrder(const localnode_map& children)

@@ -12471,8 +12471,9 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
         if (!l->isFilterStillDownloading(nchildren))
         {
             // apply newly downloaded filter.
+            l->isFilterDownloading(false);
             l->loadFilters();
-            l->applyFilters(true);
+            l->applyFilters();
         }
         else
         {
@@ -12896,8 +12897,9 @@ bool MegaClient::syncup(LocalNode* l, dstime* nds, size_t& pending)
         if (!l->isFilterStillDownloading(nchildren))
         {
             // apply newly downloaded filter.
+            l->isFilterDownloading(false);
             l->loadFilters();
-            l->applyFilters(true);
+            l->applyFilters();
         }
         else
         {

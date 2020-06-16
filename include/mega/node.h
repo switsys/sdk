@@ -391,7 +391,7 @@ struct MEGA_API LocalNode : public File
 
     // recursively update child filter state.
     // returns true if any nodes have become unignored.
-    bool applyFilters(const bool clearPending = false);
+    bool applyFilters();
 
     // clear filters.
     void clearFilters();
