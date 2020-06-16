@@ -12465,10 +12465,10 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
     }
 
     // was this node's filter being downloaded?
-    if (l->isFilterPending())
+    if (l->isFilterDownloading())
     {
         // is it still downloading?
-        if (!l->isFilterDownloading(nchildren))
+        if (!l->isFilterStillDownloading(nchildren))
         {
             // apply newly downloaded filter.
             l->loadFilters();
@@ -12478,7 +12478,7 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
         {
             LOG_verbose << "Skipping syncdown of "
                         << l->name
-                        << " as filter is pending.";
+                        << " as filter is downloading.";
         }
 
         // remote changes will be pulled during next syncdown.
@@ -12755,7 +12755,7 @@ bool MegaClient::syncdown(LocalNode* l, string* localpath, bool rubbish)
                     // i.e. don't do anything else until the filters are stable.
                     if (isIgnoreFile(*rit.second))
                     {
-                        l->isFilterPending(true);
+                        l->isFilterDownloading(true);
                         break;
                     }
                 }
@@ -12889,11 +12889,11 @@ bool MegaClient::syncup(LocalNode* l, dstime* nds, size_t& pending)
         }
     }
 
-    // is this node's filter stable?
-    if (l->isFilterPending())
+    // was this node's filter downloading?
+    if (l->isFilterDownloading())
     {
         // is the filter still downloading?
-        if (!l->isFilterDownloading(nchildren))
+        if (!l->isFilterStillDownloading(nchildren))
         {
             // apply newly downloaded filter.
             l->loadFilters();
@@ -12903,7 +12903,7 @@ bool MegaClient::syncup(LocalNode* l, dstime* nds, size_t& pending)
         {
             LOG_verbose << "Skipping syncup of "
                         << l->name 
-                        << " as filter is pending.";
+                        << " as filter is downloading.";
         }
 
         // queue further syncup.

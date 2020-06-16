@@ -405,14 +405,14 @@ struct MEGA_API LocalNode : public File
     // true if name should be ignored.
     bool isExcluded(const string& name) const;
 
+    // specify whether this node's filter is downloading.
+    void isFilterDownloading(const bool downloading);
+
     // true if this node's filter is downloading.
-    bool isFilterDownloading(const remotenode_map& children) const;
+    bool isFilterDownloading() const;
 
-    // specify whether this node's filter is pending.
-    void isFilterPending(const bool pending);
-
-    // true if this node's filter is pending.
-    bool isFilterPending() const;
+    // true if this node's filter is still downloading.
+    bool isFilterStillDownloading(const remotenode_map& children) const;
 
     // true if name should not be ignored.
     bool isIncluded(const string& name) const;
@@ -432,13 +432,13 @@ private:
         bool mClearParentFilterOnDeletion : 1;
 
         // true if our filter is currently being downloaded.
-        bool mFilterPending : 1;
+        bool mFilterDownloading : 1;
 
         // true if this node is ignored.
         bool mIgnored : 1;
 
         // true if some parent of ours has a pending filter.
-        bool mParentFilterPending : 1;
+        bool mParentFilterDownloading : 1;
     };
 
     // purges pending directory notification for this node and its children.
