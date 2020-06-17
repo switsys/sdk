@@ -393,7 +393,7 @@ struct MEGA_API LocalNode : public File
     // returns true if any nodes have become unignored.
     bool applyFilters();
 
-    // clear filters.
+    // conditionally clears this node's filters.
     void clearFilters();
 
     // specify whether we should clear our parent's filters when we are deleted.
@@ -420,8 +420,7 @@ struct MEGA_API LocalNode : public File
     // true if this node is ignored.
     bool isIgnored() const;
 
-    // destructively updates filters.
-    void loadFilters(string& rootPath);
+    // conditionally loads this node's filters.
     void loadFilters();
 
 private:
@@ -431,8 +430,14 @@ private:
         // true if we should clear our parent's filter when we are deleted.
         bool mClearParentFilterOnDeletion : 1;
 
+        // true if our filter was cleared while we were ignored.
+        bool mFilterClearPending : 1;
+
         // true if our filter is currently being downloaded.
         bool mFilterDownloading : 1;
+
+        // true if our filter was loaded while we were ignored.
+        bool mFilterLoadPending : 1;
 
         // true if this node is ignored.
         bool mIgnored : 1;
@@ -441,11 +446,17 @@ private:
         bool mParentFilterDownloading : 1;
     };
 
+    // true if a filter operation is pending.
+    bool hasPendingFilterOperations() const;
+
+    // loads filters from the ignorefile contained in rootPath.
+    void loadFilters(string& rootPath);
+
     // purges pending directory notification for this node and its children.
     void purgePendingNotifications();
 
-    // regenerates mIgnored and mParentFilterPending based on parent.
-    void recomputeFilterFlags();
+    // regenerates filter state and performs deferred operations.
+    void recomputeFilterState();
 
     FilterChain mFilters;
 };

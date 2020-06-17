@@ -1207,7 +1207,7 @@ void LocalNode::setnameparent(LocalNode* newparent, string* newlocalpath, std::u
             if (!newnode)
             {
                 // Recompute filter state.
-                recomputeFilterFlags();
+                recomputeFilterState();
 
                 // Don't bother updating our children if we're moving to a
                 // new location in the hierarchy. The "movement" code below
@@ -1268,7 +1268,7 @@ void LocalNode::setnameparent(LocalNode* newparent, string* newlocalpath, std::u
             parent = newparent;
 
             // Recompute filter state.
-            recomputeFilterFlags();
+            recomputeFilterState();
 
             if (!newnode)
             {
@@ -1484,7 +1484,9 @@ void LocalNode::init(Sync* csync, nodetype_t ctype, LocalNode* cparent, string* 
     bumpnagleds();
 
     mClearParentFilterOnDeletion = true;
+    mFilterClearPending = false;
     mFilterDownloading = false;
+    mFilterLoadPending = false;
     mIgnored = false;
     mParentFilterDownloading = false;
 
@@ -2003,6 +2005,13 @@ bool LocalNode::applyFilters()
 
     LOG_verbose << "Applying filters for " << name;
 
+    // bail if we have pending operations and were called directly.
+    if (hasPendingFilterOperations())
+    {
+        LOG_verbose << "Skipped as filter operations are pending.";
+        return false;
+    }
+
     // queue children.
     for (auto &child_it : children)
     {
@@ -2017,7 +2026,7 @@ bool LocalNode::applyFilters()
         const bool wasIgnored = child.mIgnored;
         
         // recompute filter state.
-        child.recomputeFilterFlags();
+        child.recomputeFilterState();
 
         LOG_verbose << child.name
                     << ": busy? "
@@ -2068,9 +2077,21 @@ bool LocalNode::applyFilters()
 
 void LocalNode::clearFilters()
 {
-    LOG_verbose << "Clearing filters for " << name;
+    mFilterLoadPending = false;
 
-    mFilters.clear();
+    if (mIgnored)
+    {
+        LOG_verbose << "Deferring filter clear for " << name;
+
+        mFilterClearPending = true;
+    }
+    else
+    {
+        LOG_verbose << "Clearing filters for " << name;
+        mFilters.clear();
+        
+        mFilterClearPending = false;
+    }
 }
 
 void LocalNode::clearParentFilterOnDeletion(const bool clear)
@@ -2091,7 +2112,7 @@ bool LocalNode::isExcluded(const string& name) const
 
     if (mIgnored)
     {
-        LOG_verbose << name << " excluded by ignored parent " << path;
+        LOG_verbose << name << " excluded by excluded parent " << path;
         return true;
     }
 
@@ -2228,8 +2249,6 @@ void LocalNode::loadFilters(string& rootPath)
 {
     assert(type == FOLDERNODE);
 
-    LOG_verbose << "Loading filters for " << rootPath;
-
     const size_t size = rootPath.size();
 
     rootPath.append(sync->client->fsaccess->localseparator);
@@ -2260,14 +2279,34 @@ void LocalNode::loadFilters(string& rootPath)
     }
 }
 
+bool LocalNode::hasPendingFilterOperations() const
+{
+    return mFilterClearPending | mFilterLoadPending;
+}
+
 void LocalNode::loadFilters()
 {
     assert(type == FOLDERNODE);
 
-    string path;
+    mFilterClearPending = false;
 
-    getlocalpath(&path);
-    loadFilters(path);
+    if (mIgnored)
+    {
+        LOG_verbose << "Deferring filter load for " << name;
+
+        mFilterLoadPending = true;
+    }
+    else
+    {
+        string path;
+
+        LOG_verbose << "Loading filters for " << name;
+
+        getlocalpath(&path);
+        loadFilters(path);
+
+        mFilterLoadPending = false;
+    }
 }
 
 void LocalNode::purgePendingNotifications()
@@ -2290,9 +2329,22 @@ void LocalNode::purgePendingNotifications()
     }
 }
 
-void LocalNode::recomputeFilterFlags()
+void LocalNode::recomputeFilterState()
 {
     mIgnored = parent->isExcluded(name);
+
+    if (!mIgnored)
+    {
+        if (mFilterClearPending)
+        {
+            clearFilters();
+        }
+
+        if (mFilterLoadPending)
+        {
+            loadFilters();
+        }
+    }
 }
 
 list<pair<const string*, LocalNode*>> inSyncOrder(const localnode_map& children)
