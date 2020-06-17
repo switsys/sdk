@@ -62,7 +62,7 @@ std::shared_ptr<mega::MegaClient> makeClient(mega::MegaApp& app, mega::FileSyste
     };
 
     std::shared_ptr<mega::MegaClient> client{new mega::MegaClient{
-            &app, nullptr, httpio, &fsaccess, nullptr, nullptr, "XXX", "unit_test"
+            &app, nullptr, httpio, &fsaccess, nullptr, nullptr, "XXX", "unit_test", 0
         }, deleter};
 
     return client;
@@ -99,7 +99,7 @@ std::unique_ptr<mega::LocalNode> makeLocalNode(mega::Sync& sync, mega::LocalNode
     auto l = std::unique_ptr<mega::LocalNode>{new mega::LocalNode};
     auto path = parent.getLocalPath();
     path.separatorAppend(::mega::LocalPath::fromPath(tmpname, fsaccess), fsaccess, true);
-    l->init(&sync, type, &parent, path);
+    l->init(&sync, type, &parent, path, sync.client->fsaccess->fsShortname(path));
     l->setfsid(nextFsId(), sync.client->fsidnode);
     static_cast<mega::FileFingerprint&>(*l) = ffp;
     return l;

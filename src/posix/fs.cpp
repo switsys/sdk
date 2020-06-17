@@ -1772,11 +1772,11 @@ PosixDirNotify::PosixDirNotify(LocalPath& localbasepath, const LocalPath& ignore
   : DirNotify(localbasepath, ignore)
 {
 #ifdef USE_INOTIFY
-    failed = 0;
+    setFailed(0, "");
 #endif
 
 #ifdef __MACH__
-    failed = 0;
+    setFailed(0, "");
 #endif
 
     fsaccess = NULL;
@@ -1861,7 +1861,7 @@ DirAccess* PosixFileSystemAccess::newdiraccess()
     return new PosixDirAccess();
 }
 
-DirNotify* PosixFileSystemAccess::newdirnotify(LocalPath& localpath, LocalPath& ignore)
+DirNotify* PosixFileSystemAccess::newdirnotify(LocalPath& localpath, LocalPath& ignore, Waiter*)
 {
     PosixDirNotify* dirnotify = new PosixDirNotify(localpath, ignore);
 

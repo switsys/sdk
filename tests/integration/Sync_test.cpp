@@ -75,8 +75,10 @@ struct Model
         enum nodetype { file, folder };
         nodetype type = folder;
         string name;
+        vector<uint8_t> data;
         vector<unique_ptr<ModelNode>> kids;
         ModelNode* parent = nullptr;
+
         string path() 
         {
             string s;
@@ -117,13 +119,28 @@ struct Model
         return n;
     }
 
-    unique_ptr<ModelNode> makeModelSubfile(const string& utf8Name)
+    unique_ptr<ModelNode> makeModelSubfile(const string& u8name, const void *data, const size_t data_length)
     {
-        unique_ptr<ModelNode> n(new ModelNode);
-        n->name = utf8Name;
-        n->type = ModelNode::file;
-        return n;
+        unique_ptr<ModelNode> node(new ModelNode());
+        const uint8_t * const m = reinterpret_cast<const uint8_t *>(data);
+
+        node->name = u8name;
+        node->data.assign(m, m + data_length);
+        node->type = ModelNode::file;
+
+        return node;
     }
+
+    unique_ptr<ModelNode> makeModelSubfile(const string& u8name, const std::vector<uint8_t> &data)
+    {
+        return makeModelSubfile(u8name, data.data(), data.size());
+    }
+
+    unique_ptr<ModelNode> makeModelSubfile(const string& u8name)
+    {
+        return makeModelSubfile(u8name, u8name.data(), u8name.size());
+    }
+
 
     unique_ptr<ModelNode> buildModelSubdirs(const string& prefix, int n, int recurselevel, int filesperdir)
     {
@@ -353,12 +370,15 @@ struct StandardClient : public MegaApp
 #else
             NULL,
 #endif
-            "N9tSBJDC", USER_AGENT.c_str())
+            "N9tSBJDC", USER_AGENT.c_str(), THREADS_PER_MEGACLIENT )
         , clientname(name)
         , fsBasePath(basepath / fs::u8path(name))
         , clientthread([this]() { threadloop(); })
     {
         client.clientname = clientname + " ";
+#ifdef GFX_CLASS
+        gfx.startProcessingThread();
+#endif
     }
 
     ~StandardClient()
@@ -367,7 +387,7 @@ struct StandardClient : public MegaApp
         thread_do([](MegaClient& mc, promise<bool>&) { 
             #ifdef _WIN32
                 // logout stalls in windows due to the issue above
-                mc.purgenodesusersabortsc(); 
+                mc.purgenodesusersabortsc(false); 
             #else
                 mc.logout();
             #endif
@@ -383,7 +403,7 @@ struct StandardClient : public MegaApp
         thread_do([](MegaClient& mc, promise<bool>&) {
             #ifdef _WIN32
                 // logout stalls in windows due to the issue above
-                mc.purgenodesusersabortsc();
+                mc.purgenodesusersabortsc(false);
             #else
                 mc.locallogout(false);
             #endif
@@ -418,6 +438,15 @@ struct StandardClient : public MegaApp
     //void syncupdate_remote_rename(Sync*, Node* n, const char* cp) override { if (logcb) { lock_guard<mutex> g(om); cout << clientname << " syncupdate_remote_rename() " << n->displaypath() << " " << cp << endl; }}
     //void syncupdate_treestate(LocalNode* ln) override { if (logcb) { lock_guard<mutex> g(om);   cout << clientname << " syncupdate_treestate() " << ln->ts << " " << ln->dts << " " << lp(ln) << endl; }}
 
+
+    
+    std::atomic<unsigned> transfersAdded{0}, transfersRemoved{0}, transfersPrepared{0}, transfersFailed{0}, transfersUpdated{0}, transfersComplete{0};
+    void transfer_added(Transfer*) { ++transfersAdded; }
+    void transfer_removed(Transfer*) { ++transfersRemoved; }
+    void transfer_prepare(Transfer*) { ++transfersPrepared; }
+    void transfer_failed(Transfer*, error, dstime = 0) { ++transfersFailed; }
+    void transfer_update(Transfer*) { ++transfersUpdated; }
+    void transfer_complete(Transfer*) { ++transfersComplete; }
 
 
     void threadloop()
@@ -826,7 +855,7 @@ struct StandardClient : public MegaApp
     }
 
 
-    bool recursiveConfirm(Model::ModelNode* mn, Node* n, int& descendants, const string& identifier, int depth)
+    bool recursiveConfirm(Model::ModelNode* mn, Node* n, int& descendants, const string& identifier, int depth, bool& firstreported)
     {
         // top level names can differ so we don't check those
         if (!mn || !n) return false;
@@ -839,6 +868,12 @@ struct StandardClient : public MegaApp
         {
             cout << "Node type mismatch: " << mn->path() << ":" << mn->type << " " << n->displaypath() << ":" << n->type << endl;
             return false;
+        }
+
+        if (n->type == FILENODE) 
+        {
+            // not comparing any file versioning (for now)
+            return true;
         }
 
         multimap<string, Model::ModelNode*> ms;
@@ -863,7 +898,7 @@ struct StandardClient : public MegaApp
             for (auto i = er.first; i != er.second; ++i)
             {
                 int rdescendants = 0;
-                if (recursiveConfirm(m_iter->second, i->second, rdescendants, identifier, depth+1))
+                if (recursiveConfirm(m_iter->second, i->second, rdescendants, identifier, depth+1, firstreported))
                 {
                     ++matched;
                     matchedlist.push_back(m_iter->first);
@@ -885,20 +920,23 @@ struct StandardClient : public MegaApp
             descendants += matched;
             return true;
         }
-        else
+        else if (!firstreported)
         {
-            cout << identifier << " after matching " << matched << " child nodes [";
+            firstreported = true;
+            cout << clientname << " " << identifier << " after matching " << matched << " child nodes [";
             for (auto& ml : matchedlist) cout << ml << " ";
             cout << "](with " << descendants << " descendants) in " << mn->path() << ", ended up with unmatched model nodes:";
             for (auto& m : ms) cout << " " << m.first;
             cout << " and unmatched remote nodes:";
             for (auto& i : ns) cout << " " << i.first;
             cout << endl;
-            return false;
         };
+        return false;
     }
 
-    bool recursiveConfirm(Model::ModelNode* mn, LocalNode* n, int& descendants, const string& identifier, int depth)
+    bool localNodesMustHaveNodes = true;
+
+    bool recursiveConfirm(Model::ModelNode* mn, LocalNode* n, int& descendants, const string& identifier, int depth, bool& firstreported)
     {
         // top level names can differ so we don't check those
         if (!mn || !n) return false;
@@ -921,7 +959,10 @@ struct StandardClient : public MegaApp
         {
             EXPECT_EQ(n->name, n_localname);
         }
-        EXPECT_TRUE(n->node != nullptr);
+        if (localNodesMustHaveNodes)
+        {
+            EXPECT_TRUE(n->node != nullptr);
+        }
         if (depth && n->node)
         {
             EXPECT_EQ(n->node->displayname(), n->name);
@@ -972,7 +1013,7 @@ struct StandardClient : public MegaApp
             for (auto i = er.first; i != er.second; ++i)
             {
                 int rdescendants = 0; 
-                if (recursiveConfirm(m_iter->second, i->second, rdescendants, identifier, depth+1))
+                if (recursiveConfirm(m_iter->second, i->second, rdescendants, identifier, depth+1, firstreported))
                 {
                     ++matched;
                     matchedlist.push_back(m_iter->first);
@@ -993,21 +1034,22 @@ struct StandardClient : public MegaApp
         {
             return true;
         }
-        else
+        else if (!firstreported)
         {
-            cout << identifier << " after matching " << matched << " child nodes [";
+            firstreported = true;
+            cout << clientname << " " << identifier << " after matching " << matched << " child nodes [";
             for (auto& ml : matchedlist) cout << ml << " ";
             cout << "](with " << descendants << " descendants) in " << mn->path() << ", ended up with unmatched model nodes:";
             for (auto& m : ms) cout << " " << m.first;
             cout << " and unmatched LocalNodes:";
             for (auto& i : ns) cout << " " << i.first;
             cout << endl;
-            return false;
         };
+        return false;
     }
 
 
-    bool recursiveConfirm(Model::ModelNode* mn, fs::path p, int& descendants, const string& identifier, int depth)
+    bool recursiveConfirm(Model::ModelNode* mn, fs::path p, int& descendants, const string& identifier, int depth, bool ignoreDebris, bool& firstreported)
     {
         if (!mn) return false;
         if (depth && mn->name != p.filename().u8string())
@@ -1024,11 +1066,18 @@ struct StandardClient : public MegaApp
 
         if (pathtype == FILENODE && p.filename().u8string() != "lock")
         {
-            ifstream fs(p, ios::binary);
-            char filedata[1024];
-            fs.read(filedata, sizeof(filedata));
-            EXPECT_EQ(size_t(fs.gcount()), p.filename().u8string().size()) << " file is not expected size " << p;
-            EXPECT_TRUE(!memcmp(filedata, p.filename().u8string().data(), p.filename().u8string().size())) << " file data mismatch " << p;
+            std::vector<uint8_t> buffer;
+            std::ifstream istream(p, ios::binary);
+
+            buffer.reserve(mn->data.size());
+
+            istream.read(reinterpret_cast<char *>(buffer.data()), buffer.capacity());
+
+            if (static_cast<size_t>(istream.gcount()) != buffer.capacity()
+                || !std::equal(mn->data.begin(), mn->data.end(), buffer.begin()))
+            {
+                return false;
+            }
         }
 
         if (pathtype != FOLDERNODE)
@@ -1041,6 +1090,11 @@ struct StandardClient : public MegaApp
         for (auto& m : mn->kids) ms.emplace(m->name, m.get());
         for (fs::directory_iterator pi(p); pi != fs::directory_iterator(); ++pi) ps.emplace(pi->path().filename().u8string(), pi->path());
 
+        if (ignoreDebris)
+        {
+            ps.erase(DEBRISFOLDER);
+        }
+
         int matched = 0;
         vector<string> matchedlist;
         for (auto m_iter = ms.begin(); m_iter != ms.end(); )
@@ -1052,7 +1106,7 @@ struct StandardClient : public MegaApp
             for (auto i = er.first; i != er.second; ++i)
             {
                 int rdescendants = 0; 
-                if (recursiveConfirm(m_iter->second, i->second, rdescendants, identifier, depth+1))
+                if (recursiveConfirm(m_iter->second, i->second, rdescendants, identifier, depth+1, ignoreDebris, firstreported))
                 {
                     ++matched;
                     matchedlist.push_back(m_iter->first);
@@ -1077,17 +1131,18 @@ struct StandardClient : public MegaApp
         {
             return true;
         }
-        else
+        else if (!firstreported)
         {
-            cout << identifier << " after matching " << matched << " child nodes [";
+            firstreported = true;
+            cout << clientname << " " << identifier << " after matching " << matched << " child nodes [";
             for (auto& ml : matchedlist) cout << ml << " ";
             cout << "](with " << descendants << " descendants) in " << mn->path() << ", ended up with unmatched model nodes:";
             for (auto& m : ms) cout << " " << m.first;
             cout << " and unmatched filesystem paths:";
-            for (auto& i : ps) cout << " " << i.second;
-            cout << endl;
-            return false;
+            for (auto& i : ps) cout << " " << i.second.filename();
+            cout << " in " << p << endl;
         };
+        return false;
     }
 
     Sync* syncByTag(int tag)
@@ -1100,20 +1155,30 @@ struct StandardClient : public MegaApp
         return nullptr;
     }
 
-    bool confirmModel(int syncid, Model::ModelNode* mnode)
+    enum Confirm
+    {
+        CONFIRM_LOCALFS = 0x01,
+        CONFIRM_LOCALNODE = 0x02,
+        CONFIRM_LOCAL = CONFIRM_LOCALFS | CONFIRM_LOCALNODE,
+        CONFIRM_REMOTE = 0x04,
+        CONFIRM_ALL = CONFIRM_LOCAL | CONFIRM_REMOTE,
+    };
+
+    bool confirmModel(int syncid, Model::ModelNode* mnode, const Confirm confirm, const bool ignoreDebris)
     {
         auto si = syncSet.find(syncid);
         if (si == syncSet.end())
         {
-            cout << "syncid " << syncid << " not found " << endl;
+            cout << clientname << " syncid " << syncid << " not found " << endl;
             return false;
         }
 
-        // compare model aganst nodes representing remote state
+        // compare model against nodes representing remote state
         int descendants = 0;
-        if (!recursiveConfirm(mnode, client.nodebyhandle(si->second.h), descendants, "Sync " + to_string(syncid), 0))
+        bool firstreported = false;
+        if (confirm & CONFIRM_REMOTE && !recursiveConfirm(mnode, client.nodebyhandle(si->second.h), descendants, "Sync " + to_string(syncid), 0, firstreported))
         {
-            cout << "syncid " << syncid << " comparison against remote nodes failed" << endl;
+            cout << clientname << " syncid " << syncid << " comparison against remote nodes failed" << endl;
             return false;
         }
 
@@ -1121,18 +1186,20 @@ struct StandardClient : public MegaApp
         descendants = 0; 
         if (Sync* sync = syncByTag(syncid))
         {
-            if (!recursiveConfirm(mnode, sync->localroot.get(), descendants, "Sync " + to_string(syncid), 0))
+            bool firstreported = false;
+            if (confirm & CONFIRM_LOCALNODE && !recursiveConfirm(mnode, sync->localroot.get(), descendants, "Sync " + to_string(syncid), 0, firstreported))
             {
-                cout << "syncid " << syncid << " comparison against LocalNodes failed" << endl;
+                cout << clientname << " syncid " << syncid << " comparison against LocalNodes failed" << endl;
                 return false;
             }
         }
 
         // compare model against local filesystem
         descendants = 0;
-        if (!recursiveConfirm(mnode, si->second.localpath, descendants, "Sync " + to_string(syncid), 0))
+        firstreported = false;
+        if (confirm & CONFIRM_LOCALFS && !recursiveConfirm(mnode, si->second.localpath, descendants, "Sync " + to_string(syncid), 0, ignoreDebris, firstreported))
         {
-            cout << "syncid " << syncid << " comparison against local filesystem failed" << endl;
+            cout << clientname << " syncid " << syncid << " comparison against local filesystem failed" << endl;
             return false;
         }
 
@@ -1404,12 +1471,13 @@ struct StandardClient : public MegaApp
         return fb.get();
     }
 
-    bool confirmModel_mainthread(Model::ModelNode* mnode, int syncid)
+    bool confirmModel_mainthread(Model::ModelNode* mnode, int syncid, const bool ignoreDebris = false, const Confirm confirm = CONFIRM_ALL)
     {
         future<bool> fb;
-        fb = thread_do([syncid, mnode](StandardClient& sc, promise<bool>& pb) { pb.set_value(sc.confirmModel(syncid, mnode)); });
+        fb = thread_do([syncid, mnode, ignoreDebris, confirm](StandardClient& sc, promise<bool>& pb) { pb.set_value(sc.confirmModel(syncid, mnode, confirm, ignoreDebris)); });
         return fb.get();
     }
+
 };
 
 
@@ -1510,20 +1578,41 @@ fs::path makeNewTestRoot(fs::path p)
 
 //std::atomic<int> fileSizeCount = 20;
 
+bool createFile(const fs::path &path, const void *data, const size_t data_length)
+{
+#if (__cplusplus >= 201700L)
+    ofstream ostream(path, ios::binary);
+#else
+    ofstream ostream(path.u8string(), ios::binary);
+#endif
+
+    ostream.write(reinterpret_cast<const char *>(data), data_length);
+
+    return ostream.good();
+}
+
+bool createFile(const fs::path &path, const std::vector<uint8_t> &data)
+{
+    return createFile(path, data.data(), data.size());
+}
+
 bool createFile(const fs::path &p, const string &filename)
 {
-    fs::path fp = p / fs::u8path(filename);
-#if (__cplusplus >= 201700L)
-    ofstream fs(fp/*, ios::binary*/);
-#else
-    ofstream fs(fp.u8string()/*, ios::binary*/);
-#endif
-    fs << filename;
-    if (fs.bad())
+    return createFile(p / fs::u8path(filename), filename.data(), filename.size());
+}
+
+bool createFileWithTimestamp(const fs::path &path,
+                             const std::vector<uint8_t> &data,
+                             const fs::file_time_type &timestamp)
+{
+    const bool result = createFile(path, data);
+
+    if (result)
     {
-        return false;
+        fs::last_write_time(path, timestamp);
     }
-    return true;
+
+    return result;
 }
 
 bool buildLocalFolders(fs::path targetfolder, const string& prefix, int n, int recurselevel, int filesperfolder)
@@ -1554,6 +1643,26 @@ bool buildLocalFolders(fs::path targetfolder, const string& prefix, int n, int r
     return true;
 }
 
+void renameLocalFolders(fs::path targetfolder, const string& newprefix)
+{
+    std::list<fs::path> toRename;
+    for (fs::directory_iterator i(targetfolder); i != fs::directory_iterator(); ++i)
+    {
+        if (fs::is_directory(i->path()))
+        {
+            renameLocalFolders(i->path(), newprefix);
+        }
+        toRename.push_back(i->path());
+    }
+
+    for (auto p : toRename)
+    {
+        auto newpath = p.parent_path() / (newprefix + p.filename().u8string());
+        fs::rename(p, newpath);
+    }
+}
+
+
 #ifdef __linux__
 bool createSpecialFiles(fs::path targetfolder, const string& prefix, int n = 1)
 {
@@ -1583,6 +1692,198 @@ bool createSpecialFiles(fs::path targetfolder, const string& prefix, int n = 1)
 #endif
 
 } // anonymous
+
+class SyncFingerprintCollision
+  : public ::testing::Test
+{
+public:
+    SyncFingerprintCollision()
+      : client0()
+      , client1()
+      , model0()
+      , model1()
+      , arbitraryFileLength(16384)
+    {
+        const fs::path root = makeNewTestRoot(LOCAL_TEST_FOLDER);
+
+        client0 = std::make_unique<StandardClient>(root, "c0");
+        client1 = std::make_unique<StandardClient>(root, "c1");
+
+        client0->logcb = true;
+        client1->logcb = true;
+    }
+
+    ~SyncFingerprintCollision()
+    {
+    }
+
+    void SetUp() override
+    {
+        ASSERT_TRUE(client0->login_reset_makeremotenodes("MEGA_EMAIL", "MEGA_PWD", "d", 1, 2));
+        ASSERT_TRUE(client1->login_fetchnodes("MEGA_EMAIL", "MEGA_PWD"));
+        ASSERT_EQ(client0->basefolderhandle, client1->basefolderhandle);
+
+        model0.root->addkid(model0.buildModelSubdirs("d", 2, 1, 0));
+        model1.root->addkid(model1.buildModelSubdirs("d", 2, 1, 0));
+
+        startSyncs();
+        waitOnSyncs();
+        confirmModels();
+    }
+
+    void addModelFile(Model &model,
+                      const std::string &directory,
+                      const std::string &file, 
+                      const std::vector<uint8_t> &content)
+    {
+        auto *node = model.findnode(directory);
+        ASSERT_NE(node, nullptr);
+
+        node->addkid(model.makeModelSubfile(file, content));
+    }
+
+    void confirmModel(StandardClient &client, Model &model, const int id)
+    {
+        ASSERT_TRUE(client.confirmModel_mainthread(model.findnode("d"), id));
+    }
+
+    void confirmModels()
+    {
+        confirmModel(*client0, model0, 0);
+        confirmModel(*client1, model1, 1);
+    }
+
+    const fs::path &localRoot(const StandardClient &client) const
+    {
+        return client.syncSet.at(0).localpath;
+    }
+
+    std::vector<uint8_t> randomData(const std::size_t length) const
+    {
+        std::vector<uint8_t> data(length);
+
+        std::generate_n(data.begin(), data.size(), [](){ return (uint8_t)std::rand(); });
+
+        return data;
+    }
+
+    void startSyncs()
+    {
+        ASSERT_TRUE(client0->setupSync_mainthread("s0", "d", 0));
+        ASSERT_TRUE(client1->setupSync_mainthread("s1", "d", 1));
+    }
+
+    void waitOnSyncs()
+    {
+        waitonsyncs(chrono::seconds(4), client0.get(), client1.get());
+    }
+
+    std::unique_ptr<StandardClient> client0;
+    std::unique_ptr<StandardClient> client1;
+    Model model0;
+    Model model1;
+    const std::size_t arbitraryFileLength;
+}; /* SyncFingerprintCollision */
+
+TEST_F(SyncFingerprintCollision, DifferentMacSameName)
+{
+    auto data0 = randomData(arbitraryFileLength);
+    auto data1 = data0;
+    const auto path0 = localRoot(*client0) / "d_0" / "a";
+    const auto path1 = localRoot(*client0) / "d_1" / "a";
+
+    // Alter MAC but leave fingerprint untouched.
+    data1[0x41] = static_cast<uint8_t>(~data1[0x41]);
+
+    ASSERT_TRUE(createFile(path0, data0));
+    waitOnSyncs();
+
+    auto result0 =
+      client0->thread_do([&](StandardClient &sc, std::promise<bool> &p)
+                         {
+                             p.set_value(
+                               createFileWithTimestamp(
+                                 path1,
+                                 data1,
+                                 fs::last_write_time(path0)));
+                         });
+
+    ASSERT_TRUE(waitonresults(&result0));
+    waitOnSyncs();
+
+    addModelFile(model0, "d/d_0", "a", data0);
+    addModelFile(model0, "d/d_1", "a", data1);
+    addModelFile(model1, "d/d_0", "a", data0);
+    addModelFile(model1, "d/d_1", "a", data0);
+    model1.ensureLocalDebrisTmpLock("d");
+
+    confirmModels();
+}
+
+TEST_F(SyncFingerprintCollision, DifferentMacDifferentName)
+{
+    auto data0 = randomData(arbitraryFileLength);
+    auto data1 = data0;
+    const auto path0 = localRoot(*client0) / "d_0" / "a";
+    const auto path1 = localRoot(*client0) / "d_0" / "b";
+
+    data1[0x41] = static_cast<uint8_t>(~data1[0x41]);
+
+    ASSERT_TRUE(createFile(path0, data0));
+    waitOnSyncs();
+
+    auto result0 =
+      client0->thread_do([&](StandardClient &sc, std::promise<bool> &p)
+                         {
+                             p.set_value(
+                               createFileWithTimestamp(
+                                 path1,
+                                 data1,
+                                 fs::last_write_time(path0)));
+                         });
+
+    ASSERT_TRUE(waitonresults(&result0));
+    waitOnSyncs();
+
+    addModelFile(model0, "d/d_0", "a", data0);
+    addModelFile(model0, "d/d_0", "b", data1);
+    addModelFile(model1, "d/d_0", "a", data0);
+    addModelFile(model1, "d/d_0", "b", data1);
+    model1.ensureLocalDebrisTmpLock("d");
+
+    confirmModels();
+}
+
+TEST_F(SyncFingerprintCollision, SameMacDifferentName)
+{
+    auto data0 = randomData(arbitraryFileLength);
+    const auto path0 = localRoot(*client0) / "d_0" / "a";
+    const auto path1 = localRoot(*client0) / "d_0" / "b";
+
+    ASSERT_TRUE(createFile(path0, data0));
+    waitOnSyncs();
+
+    auto result0 =
+      client0->thread_do([&](StandardClient &sc, std::promise<bool> &p)
+                         {
+                             p.set_value(
+                               createFileWithTimestamp(
+                                 path1,
+                                 data0,
+                                 fs::last_write_time(path0)));
+                         });
+
+    ASSERT_TRUE(waitonresults(&result0));
+    waitOnSyncs();
+
+    addModelFile(model0, "d/d_0", "a", data0);
+    addModelFile(model0, "d/d_0", "b", data0);
+    addModelFile(model1, "d/d_0", "a", data0);
+    addModelFile(model1, "d/d_0", "b", data0);
+    model1.ensureLocalDebrisTmpLock("d");
+
+    confirmModels();
+}
 
 GTEST_TEST(Sync, BasicSync_DelRemoteFolder)
 {
@@ -1783,6 +2084,67 @@ GTEST_TEST(Sync, BasicSync_AddLocalFolder)
     ASSERT_TRUE(clientA2.confirmModel_mainthread(model.findnode("f"), 2));
 }
 
+
+// todo: add this test once the sync can keep up with file system notifications - at the moment
+// it's too slow because we wait for the cloud before processing the next layer of files+folders.
+// So if we add enough changes to exercise the notification queue, we can't check the results because
+// it's far too slow at the syncing stage.
+GTEST_TEST(Sync, BasicSync_MassNotifyFromLocalFolderTree)
+{
+    // confirm change is synced to remote, and also seen and applied in a second client that syncs the same folder
+    fs::path localtestroot = makeNewTestRoot(LOCAL_TEST_FOLDER);
+    StandardClient clientA1(localtestroot, "clientA1");   // user 1 client 1
+    //StandardClient clientA2(localtestroot, "clientA2");   // user 1 client 2
+
+    ASSERT_TRUE(clientA1.login_reset_makeremotenodes("MEGA_EMAIL", "MEGA_PWD", "f", 0, 0));
+    //ASSERT_TRUE(clientA2.login_fetchnodes("MEGA_EMAIL", "MEGA_PWD"));
+    //ASSERT_EQ(clientA1.basefolderhandle, clientA2.basefolderhandle);
+
+    // set up sync for A1, it should build matching local folders
+    ASSERT_TRUE(clientA1.setupSync_mainthread("sync1", "f", 1));
+    //ASSERT_TRUE(clientA2.setupSync_mainthread("sync2", "f", 2));
+    waitonsyncs(std::chrono::seconds(4), &clientA1/*, &clientA2*/);
+    //clientA1.logcb = clientA2.logcb = true;
+
+    // Create a directory tree in one sync, it should be synced to the cloud and back to the other
+    // Create enough files and folders that we put a strain on the notification logic: 3k entries
+    ASSERT_TRUE(buildLocalFolders(clientA1.syncSet[1].localpath, "initial", 0, 0, 16000));
+
+    //waitonsyncs(std::chrono::seconds(10), &clientA1 /*, &clientA2*/);
+    std::this_thread::sleep_for(std::chrono::seconds(20));
+
+    Model model;
+    model.root->addkid(model.buildModelSubdirs("initial", 0, 0, 16000));
+
+    // check everything matches (just local since it'll still be uploading files)
+    clientA1.localNodesMustHaveNodes = false;
+    ASSERT_TRUE(clientA1.confirmModel_mainthread(model.root.get(), 1, false, StandardClient::CONFIRM_LOCAL));
+    //ASSERT_TRUE(clientA2.confirmModel_mainthread(model.findnode("f"), 2));
+
+    ASSERT_GT(clientA1.transfersAdded.load(), 0u);
+    clientA1.transfersAdded = 0;
+
+    // rename all those files and folders, put a strain on the notify system again.
+    // Also, no downloads (or uploads) should occur as a result of this.
+ //   renameLocalFolders(clientA1.syncSet[1].localpath, "renamed_");
+
+    // let them catch up
+    //waitonsyncs(std::chrono::seconds(10), &clientA1 /*, &clientA2*/);  
+
+    // rename is too slow to check, even just in localnodes, for now.
+
+    //ASSERT_EQ(clientA1.transfersAdded.load(), 0u);
+
+    //Model model2;
+    //model2.root->addkid(model.buildModelSubdirs("renamed_initial", 0, 0, 100));
+
+    //// check everything matches (model has expected state of remote and local)
+    //ASSERT_TRUE(clientA1.confirmModel_mainthread(model2.root.get(), 1));
+    ////ASSERT_TRUE(clientA2.confirmModel_mainthread(model2.findnode("f"), 2));
+}               
+
+
+
 /* this one is too slow for regular testing with the current algorithm
 GTEST_TEST(Sync, BasicSync_MAX_NEWNODES1)
 {
@@ -1933,6 +2295,7 @@ GTEST_TEST(Sync, DISABLED_BasicSync_MoveSeveralExistingIntoDeepNewLocalFolders)
 
     // make new folder tree in the local filesystem
     ASSERT_TRUE(buildLocalFolders(clientA1.syncSet[1].localpath, "new", 3, 3, 3));
+
     // move already synced folders to serveral parts of it - one under another moved folder too
     error_code rename_error;
     fs::rename(clientA1.syncSet[1].localpath / "f_0", clientA1.syncSet[1].localpath / "new" / "new_0" / "new_0_1" / "new_0_1_2" / "f_0", rename_error);
