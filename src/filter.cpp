@@ -38,7 +38,9 @@ private:
     static const std::regex::flag_type mRegexFlags;
 }; /* RegexFilter */
 
-static bool syntax_error(const string& text);
+static bool isEmpty(const char* m, const char* n);
+
+static bool syntaxError(const string& text);
 
 const std::regex::flag_type RegexFilter::mRegexFlags =
   std::regex_constants::extended | std::regex_constants::optimize;
@@ -171,7 +173,7 @@ bool FilterChain::add(const string& text)
         break;
     // invalid class of filter.
     default:
-        return syntax_error(text);
+        return syntaxError(text);
     }
 
     // what type of filter is this?
@@ -216,18 +218,13 @@ bool FilterChain::add(const string& text)
     // make sure we're at the start of the pattern.
     if (*m++ != ':')
     {
-        return syntax_error(text);
+        return syntaxError(text);
     }
 
     // is the pattern effectively empty?
-    while (--n > m && std::isspace(*n))
+    if (isEmpty(m, n))
     {
-        ;
-    }
-
-    if (n <= m)
-    {
-        return syntax_error(text);
+        return syntaxError(text);
     }
 
     // create the filter.
@@ -247,7 +244,7 @@ bool FilterChain::add(const string& text)
     }
     catch (std::regex_error&)
     {
-        return syntax_error(text);
+        return syntaxError(text);
     }
 
     // add the filter.
@@ -404,7 +401,19 @@ FilterStrategy RegexFilter::strategy() const
     return FS_REGEX;
 }
 
-static bool syntax_error(const string& text)
+bool isEmpty(const char* m, const char* n)
+{
+    const char* w = m;
+
+    while (m < n)
+    {
+        w += std::isspace(*m++) > 0;
+    }
+
+    return n == w;
+}
+
+bool syntaxError(const string& text)
 {
     LOG_debug << "Syntax error parsing: " << text;
 
