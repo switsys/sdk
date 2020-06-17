@@ -2191,18 +2191,25 @@ bool LocalNode::isExcluded(const string& name) const
 
 void LocalNode::isFilterDownloading(const bool downloading)
 {
+    assert(type == FOLDERNODE);
+
     localnode_list pending;
 
-    // remove pending notifications as we'll issue a scan when the filter
-    // has completed downloading.
-    if ((mFilterDownloading = downloading))
+    const bool wasDownloading = isFilterDownloading();
+
+    mFilterDownloading = downloading;
+
+    if (downloading == wasDownloading)
     {
-        purgePendingNotifications();
+        return;
     }
 
     for (auto &child_it : children)
     {
-        pending.emplace_back(child_it.second);
+        if (child_it.second->type == FOLDERNODE)
+        {
+            pending.emplace_back(child_it.second);
+        }
     }
 
     while (pending.size())
@@ -2214,7 +2221,10 @@ void LocalNode::isFilterDownloading(const bool downloading)
 
         for (auto &child_it : child.children)
         {
-            pending.emplace_back(child_it.second);
+            if (child_it.second->type == FOLDERNODE)
+            {
+                pending.emplace_back(child_it.second);
+            }
         }
 
         pending.pop_front();
@@ -2306,26 +2316,6 @@ void LocalNode::loadFilters()
         loadFilters(path);
 
         mFilterLoadPending = false;
-    }
-}
-
-void LocalNode::purgePendingNotifications()
-{
-    assert(sync);
-
-    if (!sync->dirnotify.get())
-    {
-        return;
-    }
-
-    LOG_verbose << "Purging pending notifications for " << name;
-
-    string path;
-    getlocalpath(&path);
-
-    for (int q = 0; q < DirNotify::NUMQUEUES; ++q)
-    {
-        sync->dirnotify->notifyq[q].replaceLocalNodePointers(path, (LocalNode*)~0);
     }
 }
 

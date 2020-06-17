@@ -452,9 +452,6 @@ private:
     // loads filters from the ignorefile contained in rootPath.
     void loadFilters(string& rootPath);
 
-    // purges pending directory notification for this node and its children.
-    void purgePendingNotifications();
-
     // regenerates filter state and performs deferred operations.
     void recomputeFilterState();
 
