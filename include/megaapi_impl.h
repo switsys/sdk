@@ -2227,6 +2227,7 @@ class MegaApiImpl : public MegaApp
         int getNumActiveSyncs();
         void stopSyncs(MegaRequestListener *listener=NULL);
         bool isSynced(MegaNode *n);
+        void enableIgnoreFiles(bool enabled);
         void setExclusionFilters(vector<string> *names,
                                  vector<string> *paths,
                                  long long lowerSizeLimit,

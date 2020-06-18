@@ -396,6 +396,9 @@ struct MEGA_API LocalNode : public File
     // conditionally clears this node's filters.
     void clearFilters();
 
+    // unconditionally clears all filters in this subtree.
+    void clearAllFilters();
+
     // specify whether we should clear our parent's filters when we are deleted.
     void clearParentFilterOnDeletion(const bool clear);
 
@@ -413,12 +416,16 @@ struct MEGA_API LocalNode : public File
 
     // true if this node's filter is still downloading.
     bool isFilterStillDownloading(const remotenode_map& children) const;
+    bool isFilterStillDownloading() const;
 
     // true if name should not be ignored.
     bool isIncluded(const string& name) const;
 
     // true if this node is ignored.
     bool isIgnored() const;
+
+    // unconditionally loads all filters in this subtree.
+    void loadAllFilters();
 
     // conditionally loads this node's filters.
     void loadFilters();
@@ -445,6 +452,9 @@ private:
         // true if some parent of ours has a pending filter.
         bool mParentFilterDownloading : 1;
     };
+
+    // true if this node contains an ignore file.
+    bool hasIgnoreFile() const;
 
     // true if a filter operation is pending.
     bool hasPendingFilterOperations() const;

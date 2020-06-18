@@ -3792,6 +3792,29 @@ void MegaClient::applyFilters()
     }
 }
 
+void MegaClient::clearFilters()
+{
+    for (Sync* sync : syncs)
+    {
+        sync->localroot->clearAllFilters();
+
+    }
+
+    syncdownrequired = true;
+    syncuprequired = true;
+}
+
+void MegaClient::loadFilters()
+{
+    for (Sync* sync : syncs)
+    {
+        sync->localroot->loadAllFilters();
+    }
+
+    syncdownrequired = true;
+    syncuprequired = true;
+}
+
 void MegaClient::resumeResumableSyncs()
 {
 

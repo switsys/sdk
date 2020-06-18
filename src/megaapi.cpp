@@ -3214,6 +3214,11 @@ int MegaApi::isNodeSyncable(MegaNode *node)
     return pImpl->isNodeSyncable(node);
 }
 
+void MegaApi::enableIgnoreFiles(bool enabled)
+{
+    pImpl->enableIgnoreFiles(enabled);
+}
+
 void MegaApi::setExclusionFilters(vector<string> *names,
                                   vector<string> *paths,
                                   long long lowerSizeLimit,

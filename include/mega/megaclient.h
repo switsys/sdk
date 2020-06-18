@@ -454,6 +454,12 @@ public:
     // reapplies filters on all sync trees.
     void applyFilters();
 
+    // clears all filters in all sync trees.
+    void clearFilters();
+   
+    // loads all filters in all sync trees.
+    void loadFilters();
+
     // active syncs
     sync_list syncs;
 
@@ -465,6 +471,9 @@ public:
 
     // whether we allow the automatic resumption of syncs
     bool allowAutoResumeSyncs = true;
+
+    // whether we process rules contained in ignore files.
+    bool ignoreFilesEnabled = true;
 #endif
 
     // if set, symlinks will be followed except in recursive deletions

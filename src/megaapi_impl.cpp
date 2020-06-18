@@ -8387,6 +8387,25 @@ bool MegaApiImpl::isSynced(MegaNode *n)
     return result;
 }
 
+void MegaApiImpl::enableIgnoreFiles(bool enabled)
+{
+    SdkMutexGuard guard(sdkMutex);
+
+    if (client->ignoreFilesEnabled != enabled)
+    {
+        client->ignoreFilesEnabled = enabled;
+
+        if (enabled)
+        {
+            client->loadFilters();
+        }
+        else
+        {
+            client->clearFilters();
+        }
+    }
+}
+
 void MegaApiImpl::setExclusionFilters(vector<string> *names,
                                       vector<string> *paths,
                                       long long lowerSizeLimit,

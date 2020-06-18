@@ -2075,6 +2075,62 @@ bool LocalNode::applyFilters()
     return numUnignored > 0;
 }
 
+void LocalNode::clearAllFilters()
+{
+    localnode_list pending;
+
+    // purge our filters.
+    mFilters.clear();
+
+    // clear filter flags.
+    mFilterClearPending = false;
+    mFilterDownloading = false;
+    mFilterLoadPending = false;
+
+    // queue subdirectories.
+    for (auto& child_it : children)
+    {
+        LocalNode& child = *child_it.second;
+
+        child.mIgnored = child.parent->isExcluded(child.name);
+
+        if (child.type == FOLDERNODE)
+        {
+            pending.emplace_back(&child);
+        }
+    }
+
+    // process subdirectories.
+    while (pending.size())
+    {
+        LocalNode& node = *pending.front();
+
+        // purge filters.
+        node.mFilters.clear();
+
+        // clear filter flags.
+        node.mFilterClearPending = false;
+        node.mFilterDownloading = false;
+        node.mFilterLoadPending = false;
+        node.mParentFilterDownloading = false;
+
+        // queue subdirectories.
+        for (auto& child_it : node.children)
+        {
+            LocalNode& child = *child_it.second;
+
+            child.mIgnored = child.parent->isExcluded(child.name);
+
+            if (child.type == FOLDERNODE)
+            {
+                pending.emplace_back(&child);
+            }
+        }
+
+        pending.pop_front();
+    }
+}
+
 void LocalNode::clearFilters()
 {
     mFilterLoadPending = false;
@@ -2245,6 +2301,24 @@ bool LocalNode::isFilterStillDownloading(const remotenode_map& children) const
            && child_it->second->syncget;
 }
 
+bool LocalNode::isFilterStillDownloading() const
+{
+    if (node == nullptr)
+    {
+        return false;
+    }
+
+    for (Node* node : node->children)
+    {
+        if (isIgnoreFile(*node) && node->syncget)
+        {
+            return true;
+        }
+    }
+
+    return false;
+}
+
 bool LocalNode::isIncluded(const string& name) const
 {
     return !isExcluded(name);
@@ -2253,6 +2327,56 @@ bool LocalNode::isIncluded(const string& name) const
 bool LocalNode::isIgnored() const
 {
     return mIgnored && !isBusy();
+}
+
+void LocalNode::loadAllFilters()
+{
+    localnode_list pending;
+
+    if (hasIgnoreFile())
+    {
+        mFilterDownloading = isFilterStillDownloading();
+        loadFilters();
+    }
+
+    for (auto& child_it : children)
+    {
+        LocalNode& child = *child_it.second;
+
+        child.recomputeFilterState();
+
+        if (child.type == FOLDERNODE)
+        {
+            pending.emplace_back(&child);
+        }
+    }
+
+    while (pending.size())
+    {
+        LocalNode& node = *pending.front();
+
+        node.recomputeFilterState();
+
+        if (node.hasIgnoreFile())
+        {
+            node.mFilterDownloading = isFilterStillDownloading();
+            node.loadFilters();
+        }
+
+        for (auto& child_it : node.children)
+        {
+            LocalNode& child = *child_it.second;
+
+            child.recomputeFilterState();
+
+            if (child.type == FOLDERNODE)
+            {
+                pending.emplace_back(&child);
+            }
+        }
+
+        pending.pop_front();
+    }
 }
 
 void LocalNode::loadFilters(string& rootPath)
@@ -2287,6 +2411,11 @@ void LocalNode::loadFilters(string& rootPath)
     {
         LOG_debug << "Unable to open filter file.";
     }
+}
+
+bool LocalNode::hasIgnoreFile() const
+{
+    return children.count(&Sync::IGNORE_FILENAME) > 0;
 }
 
 bool LocalNode::hasPendingFilterOperations() const
@@ -2420,7 +2549,8 @@ bool isBelow(const LocalNode& x, const LocalNode& y)
 
 bool isIgnoreFile(const LocalNode& node)
 {
-    return node.type == FILENODE
+    return node.sync->client->ignoreFilesEnabled
+           && node.type == FILENODE
            && node.name == Sync::IGNORE_FILENAME;
 }
 
@@ -2428,7 +2558,8 @@ bool isIgnoreFile(const Node& node)
 {
     attr_map::const_iterator name_it;
 
-    return node.type == FILENODE
+    return node.client->ignoreFilesEnabled
+           && node.type == FILENODE
            && ((name_it = node.attrs.map.find('n'))
                != node.attrs.map.end())
            && name_it->second == Sync::IGNORE_FILENAME;

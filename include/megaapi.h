@@ -12429,6 +12429,15 @@ class MegaApi
 
         /**
          * @brief
+         * Enable or disable ignore file processing.
+         *
+         * @param enabled
+         * True if ignore files should be processed.
+         */
+        void enableIgnoreFiles(bool enabled);
+
+        /**
+         * @brief
          * Sets exclusion filter parameters.
          *
          * @param names
